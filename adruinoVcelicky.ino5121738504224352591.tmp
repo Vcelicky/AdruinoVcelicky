@@ -1,0 +1,453 @@
+#include <DHT.h>
+#include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "MPU6050.h"
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+#include "Wire.h"
+#endif
+
+#define OUTPUT_READABLE_YAWPITCHROLL
+//#define OUTPUT_TEAPOT
+#define LED_PIN 13
+
+
+MPU6050 mpu;
+
+/*
+0 - ~17volt voltmeter
+works with 3.3volt and 5volt Arduinos
+uses the internal 1.1volt reference
+150k resistor from A1 to +batt
+10k resistor from A1 to ground
+optional 100n capacitor from A1 to ground for stable readings
+*/
+float Aref = 1.063; // change this to the actual Aref voltage of ---YOUR--- Arduino, or adjust to get accurate voltage reading (1.000- 1.200)
+unsigned int total; // A/D output
+float voltage, percentage; // converted to volt
+
+bool blinkState = false;
+bool dmpReady = false;
+volatile bool mpuInterrupt = false;
+
+uint8_t mpuIntStatus;
+uint8_t devStatus;
+uint16_t packetSize;
+uint16_t fifoCount;
+uint8_t fifoBuffer[64];
+uint8_t teapotPacket[14] = { '$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n' };
+
+Quaternion q;
+
+VectorInt16 aa;
+VectorInt16 aaReal;
+VectorInt16 aaWorld;
+
+VectorFloat gravity;
+
+float euler[3];
+float ypr[3];
+float humidity;
+float temperature;
+float humidity2;
+float temperature2;
+
+unsigned long currentTimeAkc;
+unsigned long startTimeAkc;
+unsigned long currentTime;
+unsigned long startTime;
+
+int chk; 
+
+void dmpDataReady() {
+  mpuInterrupt = true;
+}
+
+DHT dht(52, DHT22);
+DHT dht2(53, DHT22);
+
+//calibration
+int buffersize=1000;     //Amount of readings used to average, make it higher to get more precision but sketch will be slower  (default:1000)
+int acel_deadzone=8;     //Acelerometer error allowed, make it lower to get more precision, but sketch may not converge  (default:8)
+int giro_deadzone=1;     //Giro error allowed, make it lower to get more precision, but sketch may not converge  (default:1)
+
+// default I2C address is 0x68
+// specific I2C addresses may be passed as a parameter here
+// AD0 low = 0x68 (default for InvenSense evaluation board)
+// AD0 high = 0x69
+//MPU6050 accelgyro;
+
+int16_t ax, ay, az,gx, gy, gz;
+
+int mean_ax,mean_ay,mean_az,mean_gx,mean_gy,mean_gz,state=0;
+int ax_offset,ay_offset,az_offset,gx_offset,gy_offset,gz_offset;
+
+void setup() {
+  
+  analogReference(INTERNAL1V1); // use the internal ~1.1volt reference, change (INTERNAL) to (INTERNAL1V1) for a Mega
+  
+  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    Wire.begin();
+    TWBR = 24;
+  
+  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+    Fastwire::setup(400, true);
+  #endif
+
+  Serial.begin(115200);
+  while (!Serial); 
+  
+  Serial.println(F("Initializing I2C devices..."));
+  mpu.initialize();
+  
+  Serial.println(F("Testing device connections..."));
+  Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
+
+  Serial.println(F("\nSend any character to begin DMP programming and demo: "));
+  /*while (Serial.available() && Serial.read());
+  while (!Serial.available());
+  while (Serial.available() && Serial.read());*/
+
+  while (Serial.available() && Serial.read()); // empty buffer
+  while (!Serial.available()){
+    Serial.println(F("Send any character to start sketch.\n"));
+    delay(1500);
+  }                
+  while (Serial.available() && Serial.read()); // empty buffer again
+  
+  Serial.println("\nMPU6050 Calibration Sketch");
+  delay(2000);
+  Serial.println("\nYour MPU6050 should be placed in horizontal position, with package letters facing up. \nDon't touch it until you see a finish message.\n");
+  delay(3000);
+  // verify connection
+  Serial.println(mpu.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
+  delay(1000);
+  
+  Serial.println(F("Initializing DMP..."));
+  devStatus = mpu.dmpInitialize();
+
+  /*mpu.setXAccelOffset(-607);
+  mpu.setYAccelOffset(1837);
+  mpu.setZAccelOffset(3750); //1788
+  
+  mpu.setXGyroOffset(22); //220
+  mpu.setYGyroOffset(56); //76
+  mpu.setZGyroOffset(5); //-85*/
+
+  accelgyro.setXAccelOffset(0);
+  accelgyro.setYAccelOffset(0);
+  accelgyro.setZAccelOffset(0);
+  accelgyro.setXGyroOffset(0);
+  accelgyro.setYGyroOffset(0);
+  accelgyro.setZGyroOffset(0);
+
+  if (devStatus == 0) {
+    Serial.println(F("Enabling DMP..."));
+    mpu.setDMPEnabled(true);
+
+    Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)..."));
+    attachInterrupt(0, dmpDataReady, RISING);
+    mpuIntStatus = mpu.getIntStatus();
+
+    Serial.println(F("DMP ready! Waiting for first interrupt..."));
+    dmpReady = true;
+
+    packetSize = mpu.dmpGetFIFOPacketSize();
+  } 
+  else {
+    Serial.print(F("DMP Initialization failed (code "));
+    Serial.print(devStatus);
+    Serial.println(F(")"));
+  }
+  
+  pinMode(LED_PIN, OUTPUT);
+
+  dht.begin();
+  dht2.begin();
+
+  startTime = millis();
+}
+
+void loop() {
+
+  if (state==0){
+    Serial.println("\nReading sensors for first time...");
+    meansensors();
+    state++;
+    delay(1000);
+  }
+
+  if (state==1) {
+    Serial.println("\nCalculating offsets...");
+    calibration();
+    state++;
+    delay(1000);
+  }
+
+  if (state==2) {
+    meansensors();
+    Serial.println("\nFINISHED!");
+    Serial.print("\nSensor readings with offsets:\t");
+    Serial.print(mean_ax); 
+    Serial.print("\t");
+    Serial.print(mean_ay); 
+    Serial.print("\t");
+    Serial.print(mean_az); 
+    Serial.print("\t");
+    Serial.print(mean_gx); 
+    Serial.print("\t");
+    Serial.print(mean_gy); 
+    Serial.print("\t");
+    Serial.println(mean_gz);
+    Serial.print("Your offsets:\t");
+    Serial.print(ax_offset); 
+    Serial.print("\t");
+    Serial.print(ay_offset); 
+    Serial.print("\t");
+    Serial.print(az_offset); 
+    Serial.print("\t");
+    Serial.print(gx_offset); 
+    Serial.print("\t");
+    Serial.print(gy_offset); 
+    Serial.print("\t");
+    Serial.println(gz_offset); 
+    Serial.println("\nData is printed as: acelX acelY acelZ giroX giroY giroZ");
+    Serial.println("Check that your sensor readings are close to 0 0 16384 0 0 0");
+    Serial.println("If calibration was succesful write down your offsets so you can set them in your projects using something similar to mpu.setXAccelOffset(youroffset)");
+    while (1);
+  }
+  
+  if (!dmpReady) return;
+  
+  while (!mpuInterrupt && fifoCount < packetSize) {
+    currentTime = millis();
+    //Serial.print("Som tu startTime: "  );
+    //Serial.print(startTime);
+    //Serial.print("Som tu currentTime: "  );
+    //Serial.println(currentTime);
+    if(currentTime >=  (startTime + 2000)){
+       
+      humidity = dht.readHumidity();
+      temperature = dht.readTemperature();
+    
+      humidity2 = dht2.readHumidity();
+      temperature2 = dht2.readTemperature();
+      
+      Serial.print("Vlhkost: ");
+      Serial.print(humidity);
+    
+      Serial.print(" %, Teplota: ");
+      Serial.print(temperature);
+      Serial.println(" C");
+    
+      Serial.print("Vlhkost2: ");
+      Serial.print(humidity2);
+    
+      Serial.print(" %, Teplota2: ");
+      Serial.print(temperature2);
+      Serial.println(" C");
+
+      analogRead(1); // one unused reading to clear old sh#t
+      for (int x = 0; x < 16; x++) { // 16 analogue readings and 1/16 voltage divider = no additional maths
+        total = total + analogRead(1); // add each value
+      }
+      voltage = total * Aref / 1024; // convert readings to volt
+      // print to serial monitor
+      Serial.print("The battery is ");
+      Serial.print(voltage);
+      Serial.println(" volt");
+      total = 0; // reset value
+
+      percentage = ((voltage + 1) - 6) * 33.3;
+      Serial.print("Battery: ");
+      
+      if(percentage > 100)
+        Serial.print(100);
+      else Serial.print(percentage);
+      
+      Serial.println(" %");
+  
+      startTime = millis();
+    }
+  }
+
+  mpuInterrupt = false;
+  mpuIntStatus = mpu.getIntStatus();
+
+  fifoCount = mpu.getFIFOCount();
+
+  if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+    mpu.resetFIFO();
+    Serial.println(F("FIFO overflow!"));
+  } 
+  else if (mpuIntStatus & 0x02) {
+    
+    while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+    mpu.getFIFOBytes(fifoBuffer, packetSize);
+    fifoCount -= packetSize;
+    //Serial.print("Som tu startTime: "  );
+    //Serial.print(startTime);
+    //Serial.print(", currentTime: "  );
+    //Serial.println(currentTime);
+    
+      
+    #ifdef OUTPUT_READABLE_QUATERNION
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        Serial.print("quat\t");
+        Serial.print(q.w);
+        Serial.print("\t");
+        Serial.print(q.x);
+        Serial.print("\t");
+        Serial.print(q.y);
+        Serial.print("\t");
+        Serial.println(q.z);
+    #endif
+  
+    #ifdef OUTPUT_READABLE_EULER
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetEuler(euler, &q);
+        Serial.print("euler\t");
+        Serial.print(euler[0] * 180 / M_PI);
+        Serial.print("\t");
+        Serial.print(euler[1] * 180 / M_PI);
+        Serial.print("\t");
+        Serial.println(euler[2] * 180 / M_PI);
+    #endif
+  
+    #ifdef OUTPUT_READABLE_YAWPITCHROLL
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+
+        currentTimeAkc = millis();
+        if(currentTimeAkc >= (startTimeAkc + 500))
+        {
+        
+          Serial.print("ypr\t");
+          Serial.print(ypr[0] * 180 / M_PI);
+          Serial.print("\t");
+          Serial.print(ypr[1] * 180 / M_PI);
+          Serial.print("\t");
+          Serial.println(ypr[2] * 180 / M_PI);
+
+          if((ypr[1] * 180 / M_PI > 10) || (ypr[2] * 180 / M_PI > 10)  || (ypr[1] * 180 / M_PI < -10) || (ypr[2] * 180 / M_PI < -10)){
+            Serial.println("Ul bol premiestneny");
+          }
+          startTimeAkc = millis();
+        }
+    #endif
+  
+    #ifdef OUTPUT_READABLE_REALACCEL
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetAccel(&aa, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+        Serial.print("areal\t");
+        Serial.print(aaReal.x);
+        Serial.print("\t");
+        Serial.print(aaReal.y);
+        Serial.print("\t");
+        Serial.println(aaReal.z);
+    #endif
+  
+    #ifdef OUTPUT_READABLE_WORLDACCEL
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetAccel(&aa, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+        mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+        Serial.print("aworld\t");
+        Serial.print(aaWorld.x);
+        Serial.print("\t");
+        Serial.print(aaWorld.y);
+        Serial.print("\t");
+        Serial.println(aaWorld.z);
+    #endif
+  
+    #ifdef OUTPUT_TEAPOT
+        teapotPacket[2] = fifoBuffer[0];
+        teapotPacket[3] = fifoBuffer[1];
+        teapotPacket[4] = fifoBuffer[4];
+        teapotPacket[5] = fifoBuffer[5];
+        teapotPacket[6] = fifoBuffer[8];
+        teapotPacket[7] = fifoBuffer[9];
+        teapotPacket[8] = fifoBuffer[12];
+        teapotPacket[9] = fifoBuffer[13];
+        Serial.write(teapotPacket, 14);
+        teapotPacket[11]++;
+    #endif
+    
+     blinkState = !blinkState;
+     digitalWrite(LED_PIN, blinkState);
+  }
+}
+
+void meansensors(){
+  long i=0,buff_ax=0,buff_ay=0,buff_az=0,buff_gx=0,buff_gy=0,buff_gz=0;
+
+  while (i<(buffersize+101)){
+    // read raw accel/gyro measurements from device
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    
+    if (i>100 && i<=(buffersize+100)){ //First 100 measures are discarded
+      buff_ax=buff_ax+ax;
+      buff_ay=buff_ay+ay;
+      buff_az=buff_az+az;
+      buff_gx=buff_gx+gx;
+      buff_gy=buff_gy+gy;
+      buff_gz=buff_gz+gz;
+    }
+    if (i==(buffersize+100)){
+      mean_ax=buff_ax/buffersize;
+      mean_ay=buff_ay/buffersize;
+      mean_az=buff_az/buffersize;
+      mean_gx=buff_gx/buffersize;
+      mean_gy=buff_gy/buffersize;
+      mean_gz=buff_gz/buffersize;
+    }
+    i++;
+    delay(2); //Needed so we don't get repeated measures
+  }
+}
+
+void calibration(){
+  ax_offset=-mean_ax/8;
+  ay_offset=-mean_ay/8;
+  az_offset=(16384-mean_az)/8;
+
+  gx_offset=-mean_gx/4;
+  gy_offset=-mean_gy/4;
+  gz_offset=-mean_gz/4;
+  while (1){
+    int ready=0;
+    mpu.setXAccelOffset(ax_offset);
+    mpu.setYAccelOffset(ay_offset);
+    mpu.setZAccelOffset(az_offset);
+
+    mpu.setXGyroOffset(gx_offset);
+    mpu.setYGyroOffset(gy_offset);
+    mpu.setZGyroOffset(gz_offset);
+
+    meansensors();
+    Serial.println("...");
+
+    if (abs(mean_ax)<=acel_deadzone) ready++;
+    else ax_offset=ax_offset-mean_ax/acel_deadzone;
+
+    if (abs(mean_ay)<=acel_deadzone) ready++;
+    else ay_offset=ay_offset-mean_ay/acel_deadzone;
+
+    if (abs(16384-mean_az)<=acel_deadzone) ready++;
+    else az_offset=az_offset+(16384-mean_az)/acel_deadzone;
+
+    if (abs(mean_gx)<=giro_deadzone) ready++;
+    else gx_offset=gx_offset-mean_gx/(giro_deadzone+1);
+
+    if (abs(mean_gy)<=giro_deadzone) ready++;
+    else gy_offset=gy_offset-mean_gy/(giro_deadzone+1);
+
+    if (abs(mean_gz)<=giro_deadzone) ready++;
+    else gz_offset=gz_offset-mean_gz/(giro_deadzone+1);
+
+    if (ready==6) break;
+  }
+}
