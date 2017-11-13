@@ -181,9 +181,14 @@ void loop() {
       }
         
       Serial.print("Percentage: ");
+      
       if(percentage > 100)
-        Serial.print(100);  
-      else Serial.print(percentage);
+        Serial.print(100);
+      if(percentage < 0)
+        Serial.print(0);  
+      else if(percentage <= 100 && percentage >= 0) 
+        Serial.print(percentage);
+      
       Serial.println(" %");
       Serial.println("-------------------------Battery-------------------------");
       Serial.println(); 
