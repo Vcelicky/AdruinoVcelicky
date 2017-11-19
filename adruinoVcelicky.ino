@@ -1,3 +1,4 @@
+//libraries definition
 #include <DHT.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
@@ -11,13 +12,14 @@
 //#define OUTPUT_TEAPOT
 #define LED_PIN 13
 
-
-MPU6050 mpu;
-
+//definition of variables for battery status
 float Aref = 1.2;
 unsigned int total;
 float voltage;
 int percentage;
+
+//definition of variables for MPU6050
+MPU6050 mpu;
 
 bool blinkState = false;
 bool dmpReady = false;
@@ -45,51 +47,61 @@ float temperature;
 float humidity2;
 float temperature2;
 
-unsigned long currentTimeAkc;
-unsigned long startTimeAkc;
-unsigned long currentTime;
-unsigned long startTime;
-
 int chk; 
 
 void dmpDataReady() {
   mpuInterrupt = true;
 }
 
+//definition of variables for time measure
+unsigned long currentTimeAkc;
+unsigned long startTimeAkc;
+unsigned long currentTime;
+unsigned long startTime;
+
+//definition of variables for DHT22
 DHT dht(52, DHT22);
 DHT dht2(53, DHT22);
 
-HX711 scale(A1, A0);  
+//definition of variables for load sensor
+HX711 scale(4, 5);  
 
 void setup() {
-  
+
+  // use the internal ~1.1volt reference
   analogReference(INTERNAL1V1);
-  
+
+  //join I2C bus
   #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     Wire.begin();
     TWBR = 24;
-  
   #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
     Fastwire::setup(400, true);
   #endif
 
+  //set speed of serial communication 
   Serial.begin(115200);
   while (!Serial); 
-  
+
+  //initialize device
   Serial.println(F("Initializing I2C devices"));
   mpu.initialize();
-  
+
+  //testing connection
   Serial.println(F("Testing device connections"));
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
+  //waiting for read any character
   Serial.println(F("\nSend any character to begin: "));
   while (Serial.available() && Serial.read());
   while (!Serial.available());
   while (Serial.available() && Serial.read());
- 
+
+  //load and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = mpu.dmpInitialize();
-    
+
+  //set gyro and accel offsets
   mpu.setXAccelOffset(-607);
   mpu.setYAccelOffset(1837);
   mpu.setZAccelOffset(3750); //1788
@@ -97,15 +109,20 @@ void setup() {
   mpu.setXGyroOffset(22); //220
   mpu.setYGyroOffset(56); //76
   mpu.setZGyroOffset(5); //-85
-  
+
+  //check if it work properly
   if (devStatus == 0) {
+
+    //turn on DMP
     Serial.println(F("Enabling DMP"));
     mpu.setDMPEnabled(true);
-  
+
+    //enable interrupt detection
     Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)"));
     attachInterrupt(0, dmpDataReady, RISING);
     mpuIntStatus = mpu.getIntStatus();
-  
+
+    //set our DMP Ready flag so the main loop() function knows it's okay to use it
     Serial.println(F("DMP ready! Waiting for first interrupt"));
     dmpReady = true;
   
@@ -116,42 +133,60 @@ void setup() {
     Serial.print(devStatus);
     Serial.println(F(")"));
   }
-  
+
+  //setting control LED 
   pinMode(LED_PIN, OUTPUT);
 
+  //initialize devices
   dht.begin();
   dht2.begin();
 
+  //measure start time
   startTime = millis();
 }
 
 void loop() {
-  
+
+  //if program fails
   if (!dmpReady) {
     Serial.println("END");
     return;
   }
-  
+
+  //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
+
+    //measuring actual time
     currentTime = millis();
-    
+
+    //repeated every 2s
     if(currentTime >=  (startTime + 2000)){
-       
+
+      //setting LED status
+      blinkState = !blinkState;
+      digitalWrite(LED_PIN, blinkState);
+
+      //measuring first DHT22   
       humidity = dht.readHumidity();
       temperature = dht.readTemperature();
     
+      //measuring second DHT22
       humidity2 = dht2.readHumidity();
       temperature2 = dht2.readTemperature();
 
+      //reading value from analog input to clear old input
       analogRead(1);
-      
+
+      //measuring input voltage
       for (int x = 0; x < 16; x++) { 
         total = total + analogRead(1);
       }
-      
+
+      //converting input voltage to voltage and calculatio percentage
       voltage = total * Aref / 1024;
       percentage = (voltage - 6) * 33.3;
 
+      //printing values
       Serial.println();
       Serial.println("--------------------------DHT22--------------------------");
       Serial.print("Humidity(IN): ");
@@ -175,7 +210,7 @@ void loop() {
       Serial.print(voltage);
       Serial.println(" V");
 
-      
+      //warnning for low battery
       if(percentage <= 20){
         Serial.println("Warnning: Low battery");
       }
@@ -193,28 +228,35 @@ void loop() {
       Serial.println("-------------------------Battery-------------------------");
       Serial.println(); 
       total = 0;
-      
+
+      //measuring actual time
       startTime = millis();
     }
   }
 
+  //reset interrupt flag and get INT_STATUS byte
   mpuInterrupt = false;
   mpuIntStatus = mpu.getIntStatus();
 
+  //get FIFO count
   fifoCount = mpu.getFIFOCount();
 
+  //checking for overflow
   if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
     mpu.resetFIFO();
     //Serial.println(F("FIFO overflow!"));
   }
-   
+
+  //checking for DMP data ready interrupt
   else if (mpuIntStatus & 0x02) {
-    
+
+    // read a packet from FIFO
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
     mpu.getFIFOBytes(fifoBuffer, packetSize);
     fifoCount -= packetSize;
   
     #ifdef OUTPUT_READABLE_YAWPITCHROLL
+        // display Euler angles in degrees
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
@@ -259,9 +301,6 @@ void loop() {
         Serial.write(teapotPacket, 14);
         teapotPacket[11]++;
     #endif
-    
-    blinkState = !blinkState;
-    digitalWrite(LED_PIN, blinkState);
   }
 }
 
