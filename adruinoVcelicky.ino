@@ -42,26 +42,29 @@ VectorFloat gravity;
 
 float euler[3];
 float ypr[3];
-float humidity;
-float temperature;
-float humidity2;
-float temperature2;
 
 int chk; 
 
 void dmpDataReady() {
   mpuInterrupt = true;
 }
+bool movedHive;
 
 //definition of variables for time measure
 unsigned long currentTimeAkc;
 unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
+unsigned long startTimeWaitAkc;
 
 //definition of variables for DHT22
 DHT dht(52, DHT22);
 DHT dht2(53, DHT22);
+
+float humidity;
+float temperature;
+float humidity2;
+float temperature2;
 
 //definition of variables for load sensor
 HX711 scale(4, 5);  
@@ -143,6 +146,10 @@ void setup() {
 
   //measure start time
   startTime = millis();
+  startTimeWaitAkc = millis();
+
+  //set default state of hive
+  movedHive = false;
 }
 
 void loop() {
@@ -262,7 +269,7 @@ void loop() {
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
         currentTimeAkc = millis();
-        if(currentTimeAkc >= (startTimeAkc + 2000))
+        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 2000)))
         {
 
           Serial.println();
@@ -274,17 +281,21 @@ void loop() {
           Serial.print("°, Y:  ");
           Serial.print(ypr[2] * 180 / M_PI);
           Serial.println("°");
-          Serial.println();
-          
-          if((ypr[1] * 180 / M_PI > 10) || (ypr[2] * 180 / M_PI > 10)  || (ypr[1] * 180 / M_PI < -10) || (ypr[2] * 180 / M_PI < -10)){
-            Serial.println("State: hive was moved");
-          }
 
-          else Serial.println("State: hive is on right place");
+          if(movedHive == false){
+            
+            if((ypr[1] * 180 / M_PI > 8) || (ypr[2] * 180 / M_PI > 8)  || (ypr[1] * 180 / M_PI < -8) || (ypr[2] * 180 / M_PI < -8)){
+              movedHive = true;
+              Serial.println("State: hive was moved");
+            }
+            else Serial.println("State: hive is on right place");          
+          }
+          else Serial.println("State: hive was moved");
+          
 
           Serial.println("----------------------Accelerometer----------------------");
           Serial.println();
-          
+
           startTimeAkc = millis();
         }
     #endif
