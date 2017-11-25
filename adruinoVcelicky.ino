@@ -1,5 +1,6 @@
 //libraries definition
 #include <DHT.h>
+#include <SoftwareSerial.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "HX711.h"
@@ -68,6 +69,13 @@ float temperature2;
 
 //definition of variables for load sensor
 HX711 scale(4, 5);  
+
+//definition of variables for SigFox modem
+#define TX 12
+#define RX 13
+
+//initialization of software serial link
+SoftwareSerial Sigfox(RX, TX);
 
 void setup() {
 
@@ -150,6 +158,9 @@ void setup() {
 
   //set default state of hive
   movedHive = false;
+
+  //starting software serial link 
+  Sigfox.begin(115200);
 }
 
 void loop() {
@@ -257,13 +268,13 @@ void loop() {
   //checking for DMP data ready interrupt
   else if (mpuIntStatus & 0x02) {
 
-    // read a packet from FIFO
+    //read a packet from FIFO
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
     mpu.getFIFOBytes(fifoBuffer, packetSize);
     fifoCount -= packetSize;
   
     #ifdef OUTPUT_READABLE_YAWPITCHROLL
-        // display Euler angles in degrees
+        //display Euler angles in degrees
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
@@ -314,4 +325,5 @@ void loop() {
     #endif
   }
 }
+
 
