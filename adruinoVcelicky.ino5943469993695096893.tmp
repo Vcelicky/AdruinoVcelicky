@@ -164,7 +164,6 @@ void setup() {
 
   //starting software serial link 
   Sigfox.begin(9600);
-  Serial3.begin(9600);
 }
 
 void loop() {
@@ -174,16 +173,17 @@ void loop() {
     Serial.println("END");
     return;
   }
-    
+
   //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
 
-    if (Serial3.available()) {
-      message = Serial3.readString();
+    if (Sigfox.available()) {
+      message = Sigfox.readString();
     }    
 
+    if(message.equals(""))Serial.println(message);
     message.trim();
-    if(!message.equals("")){
+    if(message.equals("OK")){
       Serial.println("---------------SIGFOX-MESSAGE-------------------");
       Serial.println(message);
       Serial.println("---------------SIGFOX-MESSAGE-------------------");
@@ -195,13 +195,13 @@ void loop() {
     }
   
     command.trim();
-    if(!command.equals("")){
+    if(command.equals("AT")){
       Serial.println("---------------SIGFOX-COMMAND-------------------");
       command = command + "\r";
       Serial.println(command);
       Serial.println("---------------SIGFOX-COMMAND-------------------");
       
-      Serial3.println(command);
+      Sigfox.write("AT\r");
       command = "";
     }
     
