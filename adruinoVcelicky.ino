@@ -1,5 +1,6 @@
 //libraries definition
 #include <DHT.h>
+#include <SoftwareSerial.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "HX711.h"
@@ -42,29 +43,42 @@ VectorFloat gravity;
 
 float euler[3];
 float ypr[3];
-float humidity;
-float temperature;
-float humidity2;
-float temperature2;
 
 int chk; 
 
 void dmpDataReady() {
   mpuInterrupt = true;
 }
+bool movedHive;
 
 //definition of variables for time measure
 unsigned long currentTimeAkc;
 unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
+unsigned long startTimeWaitAkc;
 
 //definition of variables for DHT22
 DHT dht(52, DHT22);
 DHT dht2(53, DHT22);
 
+int humidity;
+int temperature;
+int humidity2;
+int temperature2;
+
 //definition of variables for load sensor
 HX711 scale(4, 5);  
+
+//definition of variables for SigFox modem
+#define TX 12
+#define RX 13
+
+//initialization of software serial link
+SoftwareSerial Sigfox(RX, TX);
+
+String command;
+String message;
 
 void setup() {
 
@@ -143,6 +157,14 @@ void setup() {
 
   //measure start time
   startTime = millis();
+  startTimeWaitAkc = millis();
+
+  //set default state of hive
+  movedHive = false;
+
+  //starting software serial link 
+  Sigfox.begin(9600);
+  Serial3.begin(9600);
 }
 
 void loop() {
@@ -152,10 +174,38 @@ void loop() {
     Serial.println("END");
     return;
   }
-
+    
   //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
 
+    if (Serial3.available()) {
+      message = Serial3.readString();
+    }    
+
+    message.trim();
+    if(!message.equals("")){
+      Serial.println("----------------------SIGFOX-MESSAGE---------------------");
+      Serial.println(message);
+      Serial.println("----------------------SIGFOX-MESSAGE---------------------");
+      message = "";
+    }
+    
+    if (Serial.available()) {
+     command = Serial.readString();
+    }
+  
+    command.trim();
+    if(!command.equals("")){
+      Serial.println("----------------------SIGFOX-COMMAND---------------------");
+      command = command + "\r";
+      Serial.println(command);
+      Serial.println("----------------------SIGFOX-COMMAND---------------------");
+      
+      Serial3.println(command);
+      command = "";
+    }
+
+    
     //measuring actual time
     currentTime = millis();
 
@@ -250,19 +300,19 @@ void loop() {
   //checking for DMP data ready interrupt
   else if (mpuIntStatus & 0x02) {
 
-    // read a packet from FIFO
+    //read a packet from FIFO
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
     mpu.getFIFOBytes(fifoBuffer, packetSize);
     fifoCount -= packetSize;
   
     #ifdef OUTPUT_READABLE_YAWPITCHROLL
-        // display Euler angles in degrees
+        //display Euler angles in degrees
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
         currentTimeAkc = millis();
-        if(currentTimeAkc >= (startTimeAkc + 2000))
+        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 2000)))
         {
 
           Serial.println();
@@ -274,17 +324,21 @@ void loop() {
           Serial.print("°, Y:  ");
           Serial.print(ypr[2] * 180 / M_PI);
           Serial.println("°");
-          Serial.println();
-          
-          if((ypr[1] * 180 / M_PI > 10) || (ypr[2] * 180 / M_PI > 10)  || (ypr[1] * 180 / M_PI < -10) || (ypr[2] * 180 / M_PI < -10)){
-            Serial.println("State: hive was moved");
-          }
 
-          else Serial.println("State: hive is on right place");
+          if(movedHive == false){
+            
+            if((ypr[1] * 180 / M_PI > 8) || (ypr[2] * 180 / M_PI > 8)  || (ypr[1] * 180 / M_PI < -8) || (ypr[2] * 180 / M_PI < -8)){
+              movedHive = true;
+              Serial.println("State: hive was moved");
+            }
+            else Serial.println("State: hive is on right place");          
+          }
+          else Serial.println("State: hive was moved");
+          
 
           Serial.println("----------------------Accelerometer----------------------");
           Serial.println();
-          
+
           startTimeAkc = millis();
         }
     #endif
@@ -302,5 +356,22 @@ void loop() {
         teapotPacket[11]++;
     #endif
   }
+}
+
+void sendData() {
+    char zprava[12];
+
+    char s[] = "01001011";
+    int value = 0;
+    
+    for (int i=0; i< strlen(s); i++)  // for every character in the string  strlen(s) returns the length of a char array
+    {
+      value *= 2; // double the result so far
+      if (s[i] == '1') value++;  //add 1 if needed
+    }
+    Serial.println(value);
+    
+    Sigfox.print("AT$SF=");
+    Sigfox.println(zprava);   
 }
 
