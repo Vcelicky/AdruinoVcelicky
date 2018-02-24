@@ -57,7 +57,7 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
-int interval;
+long int interval;
 
 //definition of variables for DHT22
 DHT dht(52, DHT22);
@@ -84,6 +84,8 @@ String message;
 
 void setup() {
 
+  interval = 600000;
+  
   // use the internal ~1.1volt reference
   analogReference(INTERNAL1V1);
 
@@ -167,7 +169,6 @@ void setup() {
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
-  interval = 600000;
 }
 
 void loop() {
@@ -377,7 +378,6 @@ void messageConvert() {
     if(temperature < 0){
       temperature = (-temperature) + 128;
       itoa((byte) temperature, binTemperature, 2);
-      //binTemperature[0] = '1';
       }
     else{
       itoa((byte) temperature, binTemperature, 2);
@@ -393,7 +393,6 @@ void messageConvert() {
     if(temperature2 < 0){
       temperature2 = (-temperature2) + 128;
       itoa((byte) temperature2, binTemperature2, 2);
-      //binTemperature2[0] = '1';
       }
     else{
       itoa((byte) temperature2, binTemperature2, 2);
