@@ -108,11 +108,11 @@ void setup() {
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
   //waiting for read any character
-  Serial.println(F("\nSend any character to begin: "));
+  /*Serial.println(F("\nSend any character to begin: "));
   while (Serial.available() && Serial.read());
   while (!Serial.available());
-  while (Serial.available() && Serial.read());
-
+  while (Serial.available() && Serial.read());*/
+  
   //load and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = mpu.dmpInitialize();
