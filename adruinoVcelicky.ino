@@ -57,6 +57,7 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
+int interval;
 
 //definition of variables for DHT22
 DHT dht(52, DHT22);
@@ -166,6 +167,7 @@ void setup() {
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
+  interval = 600000;
 }
 
 void loop() {
@@ -211,7 +213,7 @@ void loop() {
     currentTime = millis();
 
     //repeated every 2s
-    if(currentTime >=  (startTime + 600000)){
+    if(currentTime >=  (startTime + interval)){
 
       //setting LED status
       blinkState = !blinkState;
@@ -321,7 +323,7 @@ void loop() {
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
         currentTimeAkc = millis();
-        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 600000)))
+        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + interval)))
         {
 
           Serial.println();
@@ -371,10 +373,11 @@ void messageConvert() {
   
     Serial.println();
     char binTemperature[9] = {0};
-
+    
     if(temperature < 0){
-      itoa((byte) (-temperature), binTemperature, 2);
-      binTemperature[0] = 1;
+      temperature = (-temperature) + 128;
+      itoa((byte) temperature, binTemperature, 2);
+      //binTemperature[0] = '1';
       }
     else{
       itoa((byte) temperature, binTemperature, 2);
@@ -386,10 +389,11 @@ void messageConvert() {
     Serial.println(strlen(binTemperature));
 
     char binTemperature2[9] = {0}; 
-
+    
     if(temperature2 < 0){
-      itoa((byte) (-temperature2), binTemperature2, 2);
-      binTemperature2[0] = 1;
+      temperature2 = (-temperature2) + 128;
+      itoa((byte) temperature2, binTemperature2, 2);
+      //binTemperature2[0] = '1';
       }
     else{
       itoa((byte) temperature2, binTemperature2, 2);
@@ -494,6 +498,6 @@ void messageConvert() {
 
     Serial.println(finalMessage);
     Serial3.print("AT$SF=");
-    Serial3.println(finalMessage);  
+    Serial3.println(finalMessage);
 }
 
