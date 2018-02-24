@@ -14,7 +14,7 @@
 #define LED_PIN 13
 
 //definition of variables for battery status
-float Aref = 1.2;
+float Aref = 1.315;   //1.2 or 1.315
 unsigned int total;
 float voltage;
 int percentage;
@@ -214,7 +214,7 @@ void loop() {
     currentTime = millis();
 
     //repeated every 2s
-    if(currentTime >=  (startTime + interval)){
+    if(currentTime >=  (startTime + interval + 500)){
 
       //setting LED status
       blinkState = !blinkState;
@@ -271,15 +271,15 @@ void loop() {
         
       Serial.print("Percentage: ");
       
-      if(percentage > 100){
+      if(percentage >= 100){
         percentage = 100;
         Serial.print(percentage);
       }
-      if(percentage < 0){
+      if(percentage <= 0){
         percentage = 0;
         Serial.print(percentage); 
       } 
-      else if(percentage <= 100 && percentage >= 0) 
+      else if(percentage < 100 && percentage > 0) 
         Serial.print(percentage);
       
       Serial.println(" %");
