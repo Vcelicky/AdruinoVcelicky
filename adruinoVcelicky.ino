@@ -211,7 +211,7 @@ void loop() {
     currentTime = millis();
 
     //repeated every 2s
-    if(currentTime >=  (startTime + 2000)){
+    if(currentTime >=  (startTime + 600000)){
 
       //setting LED status
       blinkState = !blinkState;
@@ -321,7 +321,7 @@ void loop() {
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
         currentTimeAkc = millis();
-        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 2000)))
+        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 600000)))
         {
 
           Serial.println();
