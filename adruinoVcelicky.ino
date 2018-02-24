@@ -370,15 +370,31 @@ void loop() {
 void messageConvert() {
   
     Serial.println();
-    char binTemperature[9] = {0}; 
-    itoa((byte) temperature, binTemperature, 2);
+    char binTemperature[9] = {0};
+
+    if(temperature < 0){
+      itoa((byte) (-temperature), binTemperature, 2);
+      binTemperature[0] = 1;
+      }
+    else{
+      itoa((byte) temperature, binTemperature, 2);
+      }
+      
     Serial.print("Outside temperature -> ");
     Serial.print(binTemperature);
     Serial.print(":");
     Serial.println(strlen(binTemperature));
 
     char binTemperature2[9] = {0}; 
-    itoa((byte) temperature2, binTemperature2, 2);
+
+    if(temperature2 < 0){
+      itoa((byte) (-temperature2), binTemperature2, 2);
+      binTemperature2[0] = 1;
+      }
+    else{
+      itoa((byte) temperature2, binTemperature2, 2);
+      }
+      
     Serial.print("Inside temperature -> ");
     Serial.print(binTemperature2);
     Serial.print(":");
