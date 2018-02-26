@@ -14,7 +14,7 @@
 #define LED_PIN 13
 
 //definition of variables for battery status
-float Aref = 1.2;
+float Aref = 1.315;   //1.2 or 1.315
 unsigned int total;
 float voltage;
 int percentage;
@@ -57,6 +57,7 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
+long int interval;
 
 //definition of variables for DHT22
 DHT dht(52, DHT22);
@@ -68,7 +69,8 @@ int humidity2;
 int temperature2;
 
 //definition of variables for load sensor
-HX711 scale(4, 5);  
+HX711 scale(4, 5); 
+int weight; 
 
 //definition of variables for SigFox modem
 #define TX 12
@@ -82,6 +84,8 @@ String message;
 
 void setup() {
 
+  interval = 600000;
+  
   // use the internal ~1.1volt reference
   analogReference(INTERNAL1V1);
 
@@ -106,11 +110,11 @@ void setup() {
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
   //waiting for read any character
-  Serial.println(F("\nSend any character to begin: "));
+  /*Serial.println(F("\nSend any character to begin: "));
   while (Serial.available() && Serial.read());
   while (!Serial.available());
-  while (Serial.available() && Serial.read());
-
+  while (Serial.available() && Serial.read());*/
+  
   //load and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = mpu.dmpInitialize();
@@ -210,7 +214,7 @@ void loop() {
     currentTime = millis();
 
     //repeated every 2s
-    if(currentTime >=  (startTime + 2000)){
+    if(currentTime >=  (startTime + interval + 500)){
 
       //setting LED status
       blinkState = !blinkState;
@@ -267,11 +271,15 @@ void loop() {
         
       Serial.print("Percentage: ");
       
-      if(percentage > 100)
-        Serial.print(100);
-      if(percentage < 0)
-        Serial.print(0);  
-      else if(percentage <= 100 && percentage >= 0) 
+      if(percentage >= 100){
+        percentage = 100;
+        Serial.print(percentage);
+      }
+      if(percentage <= 0){
+        percentage = 0;
+        Serial.print(percentage); 
+      } 
+      else if(percentage < 100 && percentage > 0) 
         Serial.print(percentage);
       
       Serial.println(" %");
@@ -279,6 +287,10 @@ void loop() {
       Serial.println(); 
       total = 0;
 
+      Serial.println("-------------------------Message-------------------------");
+      messageConvert();
+      Serial.println("-------------------------Message-------------------------");
+      
       //measuring actual time
       startTime = millis();
     }
@@ -312,7 +324,7 @@ void loop() {
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
         currentTimeAkc = millis();
-        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + 2000)))
+        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + interval)))
         {
 
           Serial.println();
@@ -358,20 +370,133 @@ void loop() {
   }
 }
 
-void sendData() {
-    char zprava[12];
+void messageConvert() {
+  
+    Serial.println();
+    char binTemperature[9] = {0};
+    
+    if(temperature < 0){
+      temperature = (-temperature) + 128;
+      itoa((byte) temperature, binTemperature, 2);
+      }
+    else{
+      itoa((byte) temperature, binTemperature, 2);
+      }
+      
+    Serial.print("Outside temperature -> ");
+    Serial.print(binTemperature);
+    Serial.print(":");
+    Serial.println(strlen(binTemperature));
 
-    char s[] = "01001011";
-    int value = 0;
+    char binTemperature2[9] = {0}; 
     
-    for (int i=0; i< strlen(s); i++)  // for every character in the string  strlen(s) returns the length of a char array
-    {
-      value *= 2; // double the result so far
-      if (s[i] == '1') value++;  //add 1 if needed
+    if(temperature2 < 0){
+      temperature2 = (-temperature2) + 128;
+      itoa((byte) temperature2, binTemperature2, 2);
+      }
+    else{
+      itoa((byte) temperature2, binTemperature2, 2);
+      }
+      
+    Serial.print("Inside temperature -> ");
+    Serial.print(binTemperature2);
+    Serial.print(":");
+    Serial.println(strlen(binTemperature2));
+
+    char binHumidity[9] = {0}; 
+    itoa((byte) humidity, binHumidity, 2);
+    Serial.print("Outside humidity -> ");
+    Serial.print(binHumidity);
+    Serial.print(":");
+    Serial.println(strlen(binHumidity));
+
+    char binHumidity2[9] = {0}; 
+    itoa((byte) humidity2, binHumidity2, 2);
+    Serial.print("Inside humidity -> ");
+    Serial.print(binHumidity2);
+    Serial.print(":");
+    Serial.println(strlen(binHumidity2));
+
+    char binPercentage[9] = {0}; 
+    itoa((byte) percentage, binPercentage, 2);
+    Serial.print("Battery percentage -> ");
+    Serial.print(binPercentage);
+    Serial.print(":");
+    Serial.println(strlen(binPercentage));
+
+    weight = 0;
+    char binWeight[9] = {0}; 
+    itoa((byte)weight , binWeight, 2);
+    Serial.print("Weight of hive -> ");
+    Serial.print(binWeight);
+    Serial.print(":");
+    Serial.println(strlen(binWeight));
+
+    Serial.print("State of hive move -> ");
+    Serial.println(movedHive);
+
+    char finalBinMessage[49] = {"000000000000000000000000000000000000000000000000"};
+    
+    Serial.println();
+    Serial.println("Empty message:");
+    Serial.print(finalBinMessage);
+    Serial.print(":");
+    Serial.println(strlen(finalBinMessage));
+
+    int i;
+    for(i = 0; i < 8; i++){
+        if(i < strlen(binTemperature))finalBinMessage[47 - i] = binTemperature[(strlen(binTemperature)-1) - i];
     }
-    Serial.println(value);
+
+    for(i = 0; i < 8; i++){
+        if(i < strlen(binTemperature2))finalBinMessage[39 - i] = binTemperature2[(strlen(binTemperature2)-1) - i];
+    }
+
+    for(i = 0; i < 7; i++){
+        if(i < strlen(binHumidity))finalBinMessage[31 - i] = binHumidity[(strlen(binHumidity)-1) - i];
+    }
+
+    for(i = 0; i < 7; i++){
+        if(i < strlen(binHumidity2))finalBinMessage[24 - i] = binHumidity2[(strlen(binHumidity2)-1) - i];
+    }
+
+    for(i = 0; i < 7; i++){
+        if(i < strlen(binPercentage))finalBinMessage[17 - i] = binPercentage[(strlen(binPercentage)-1) - i];
+    }
+
+    for(i = 0; i < 7; i++){
+        if(i < strlen(binWeight))finalBinMessage[10 - i] = binWeight[(strlen(binWeight)-1) - i];
+    }
+
+    if(movedHive == true)finalBinMessage[0] = '1';
+    else finalBinMessage[0] = '0';
+
+    Serial.println("Final message:");
+    Serial.print(finalBinMessage);
+    Serial.print(":");
+    Serial.println(strlen(finalBinMessage));
+
+    int j = 0;   
+    char finalMessage[13] = {0};
     
-    Sigfox.print("AT$SF=");
-    Sigfox.println(zprava);   
+    for(i = 0; i < 48; i = i + 4){
+      
+      String hexaDecimal = String(finalBinMessage);
+      hexaDecimal = hexaDecimal.substring(i, i+4);
+      int val = strtol(hexaDecimal.c_str(), NULL, 2);
+      
+      Serial.print(hexaDecimal);
+      Serial.print(":");
+      Serial.print(val);
+      Serial.print(":");
+      Serial.println(String(val, HEX));
+
+      finalMessage[j] = String(val, HEX).charAt(0);
+      j++;
+    }
+
+    Serial.println(finalMessage);
+    Serial3.print("AT$SF=");
+    Serial3.println(finalMessage);
 }
 
