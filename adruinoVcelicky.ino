@@ -67,9 +67,8 @@ int16_t ax, ay, az,gx, gy, gz;
 
 int mean_ax,mean_ay,mean_az,mean_gx,mean_gy,mean_gz,state=0;
 int ax_offset,ay_offset,az_offset,gx_offset,gy_offset,gz_offset;
-int buffersize=1000;   
-int acel_deadzone=8;
-int giro_deadzone=1;
+int buffersize = 1000, acel_deadzone = 8, giro_deadzone = 1;
+int calibrationState = 0;
 
 //definition of variable for hive movement
 bool movedHive;
@@ -143,11 +142,7 @@ void setup() {
   Serial.println();
   Serial.println(F("Initializing DMP"));
   devStatus = mpu.dmpInitialize();
-
-  //MPU6050 calibration 
-  Serial.println();
-  Serial.println("Starting calibration of MPU6050");
-  
+ 
   //set gyro and accel offsets
   mpu.setXAccelOffset(0);
   mpu.setYAccelOffset(0);
@@ -155,36 +150,6 @@ void setup() {
   mpu.setXGyroOffset(0);
   mpu.setYGyroOffset(0);
   mpu.setZGyroOffset(0);
-
-  Serial.println("Reading sensors for first time");
-  meansensors();
-  delay(1000);
-
-  Serial.println("Calculating offsets:");
-  calibration();
-  delay(1000);
-
-  meansensors();
-  Serial.println("\nFinished calibration of MPU6050");
-  Serial.print("Accelerometer X: ");
-  Serial.println(ax_offset); 
-  Serial.print("Accelerometer Y: ");
-  Serial.println(ay_offset); 
-  Serial.print("Accelerometer Z: ");
-  Serial.println(az_offset); 
-  Serial.print("Gyroskop X: ");
-  Serial.println(gx_offset); 
-  Serial.print("Gyroskop Y: ");
-  Serial.println(gy_offset); 
-  Serial.print("Gyroskop Z: ");
-  Serial.println(gz_offset); 
-  Serial.println();
-  mpu.setXAccelOffset(ax_offset);
-  mpu.setYAccelOffset(ay_offset);
-  mpu.setZAccelOffset(az_offset);
-  mpu.setXGyroOffset(gx_offset);
-  mpu.setYGyroOffset(gy_offset);
-  mpu.setZGyroOffset(gz_offset);
 
   //check if it work properly
   if (devStatus == 0) {
@@ -236,6 +201,44 @@ void setup() {
 
 void loop() {
 
+  //MPU6050 calibration 
+  if(calibrationState == 0){
+    
+    Serial.println();
+    Serial.println("Starting calibration of MPU6050");
+ 
+    Serial.println("Reading sensors for first time");
+    meansensors();
+  
+    Serial.println("Calculating offsets:");
+    calibration();
+  
+    meansensors();
+    Serial.println("\nFinished calibration of MPU6050");
+    Serial.print("Accelerometer X: ");
+    Serial.println(ax_offset); 
+    Serial.print("Accelerometer Y: ");
+    Serial.println(ay_offset); 
+    Serial.print("Accelerometer Z: ");
+    Serial.println(az_offset); 
+    Serial.print("Gyroskop X: ");
+    Serial.println(gx_offset); 
+    Serial.print("Gyroskop Y: ");
+    Serial.println(gy_offset); 
+    Serial.print("Gyroskop Z: ");
+    Serial.println(gz_offset); 
+    Serial.println();
+
+    mpu.setXAccelOffset(ax_offset);
+    mpu.setYAccelOffset(ay_offset);
+    mpu.setZAccelOffset(az_offset);
+    mpu.setXGyroOffset(gx_offset);
+    mpu.setYGyroOffset(gy_offset);
+    mpu.setZGyroOffset(gz_offset);
+
+    calibrationState = 1;
+  }
+ 
   //if program fails
   if (!dmpReady) {
     Serial.println("END");
@@ -244,7 +247,6 @@ void loop() {
     
   //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
-
     if (Serial3.available()) {
       message = Serial3.readString();
     }    
@@ -370,12 +372,13 @@ void loop() {
       Serial.println(); 
       total = 0;
 
+      
       Serial.println("-------------------------Weight--------------------------");
       Serial.print("Weight: ");
       Serial.print(units);
       Serial.println(" grams");
       Serial.println("-------------------------Weight--------------------------");
-      
+            
       Serial.println("-------------------------Message-------------------------");
       messageConvert();
       Serial.println("-------------------------Message-------------------------");
