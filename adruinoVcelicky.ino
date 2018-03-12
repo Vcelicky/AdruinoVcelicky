@@ -223,7 +223,7 @@ void loop() {
     //measuring actual time
     currentTime = millis();
 
-    //repeated every 2s
+    //repeated every 10min
     if(currentTime >=  (startTime + interval + 500)){
 
       //setting LED status
@@ -238,6 +238,23 @@ void loop() {
       humidity2 = dht2.readHumidity();
       temperature2 = dht2.readTemperature();
 
+      //checking measuremts from DHT22s
+      if((humidity < 0) || (humidity > 100)){
+        humidity = 127;
+      }
+
+      if((temperature < -50) || (temperature > 80)){
+        temperature = 127;
+      }
+      
+      if((humidity2 < 0) || (humidity2 > 100)){
+        humidity2 = 127; 
+      }
+      
+      if((temperature2 < -50) || (temperature2 > 80)){
+        temperature2 = 127;
+      }
+       
       //reading value from analog input to clear old input
       analogRead(1);
 
