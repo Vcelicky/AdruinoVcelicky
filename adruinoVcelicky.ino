@@ -1,4 +1,4 @@
-//libraries definition
+  //libraries definition
 #include <DHT.h>
 #include <SoftwareSerial.h>
 #include "I2Cdev.h"
@@ -14,7 +14,7 @@
 #define LED_PIN 13
 
 //definition of variables for battery status
-float Aref = 1.315;   //1.2 or 1.315
+float Aref = 1.41;   //1.2 or 1.315 1.415
 unsigned int total;
 float voltage;
 int percentage;
@@ -79,12 +79,22 @@ int weight;
 //initialization of software serial link
 SoftwareSerial Sigfox(RX, TX);
 
+//definition of variables for sending messagnes
 String command;
 String message;
 
+char finalMessage[13] = {0};
+char lastMessage[13] = {0};
+char binTemperature[9] = {0};
+char binTemperature2[9] = {0}; 
+char binHumidity[9] = {0}; 
+char binHumidity2[9] = {0};
+char binPercentage[9] = {0}; 
+char binWeight[9] = {0};     
+    
 void setup() {
 
-  interval = 600000;
+  interval = 600000; //normal = 600000 = 10 min
   
   // use the internal ~1.1volt reference
   analogReference(INTERNAL1V1);
@@ -238,22 +248,22 @@ void loop() {
 
       //converting input voltage to voltage and calculatio percentage
       voltage = total * Aref / 1024;
-      percentage = (voltage - 6) * 33.3;
+      percentage = (voltage - 5) * 25; //(voltage - 6) * 33.3
 
       //printing values
       Serial.println();
       Serial.println("--------------------------DHT22--------------------------");
-      Serial.print("Humidity(IN): ");
+      Serial.print("Humidity(OUT): ");
       Serial.print(humidity);
     
-      Serial.print(" %, Temperature(IN): ");
+      Serial.print(" %, Temperature(OUT): ");
       Serial.print(temperature);
       Serial.println(" C");
     
-      Serial.print("Humidity(OUT): ");
+      Serial.print("Humidity(IN): ");
       Serial.print(humidity2);
     
-      Serial.print(" %, Temperature(OUT): ");
+      Serial.print(" %, Temperature(IN): ");
       Serial.print(temperature2);
       Serial.println(" C");
       Serial.println("--------------------------DHT22--------------------------");
@@ -371,10 +381,13 @@ void loop() {
 }
 
 void messageConvert() {
-  
-    Serial.println();
-    char binTemperature[9] = {0};
+
+    int j, i, val;
+    String hexaDecimal;
     
+    Serial.println();
+
+    //converting first temperature into binary
     if(temperature < 0){
       temperature = (-temperature) + 128;
       itoa((byte) temperature, binTemperature, 2);
@@ -388,8 +401,7 @@ void messageConvert() {
     Serial.print(":");
     Serial.println(strlen(binTemperature));
 
-    char binTemperature2[9] = {0}; 
-    
+    //converting second temperature into binary
     if(temperature2 < 0){
       temperature2 = (-temperature2) + 128;
       itoa((byte) temperature2, binTemperature2, 2);
@@ -403,87 +415,98 @@ void messageConvert() {
     Serial.print(":");
     Serial.println(strlen(binTemperature2));
 
-    char binHumidity[9] = {0}; 
+    //converting first humidity into binary
     itoa((byte) humidity, binHumidity, 2);
     Serial.print("Outside humidity -> ");
     Serial.print(binHumidity);
     Serial.print(":");
     Serial.println(strlen(binHumidity));
 
-    char binHumidity2[9] = {0}; 
+    //converting second humidity into binary
     itoa((byte) humidity2, binHumidity2, 2);
     Serial.print("Inside humidity -> ");
     Serial.print(binHumidity2);
     Serial.print(":");
     Serial.println(strlen(binHumidity2));
 
-    char binPercentage[9] = {0}; 
+    //converting battery state into binary
     itoa((byte) percentage, binPercentage, 2);
     Serial.print("Battery percentage -> ");
     Serial.print(binPercentage);
     Serial.print(":");
     Serial.println(strlen(binPercentage));
 
-    weight = 0;
-    char binWeight[9] = {0}; 
+    //converting weight of hive into binary
+    weight = 0; 
     itoa((byte)weight , binWeight, 2);
     Serial.print("Weight of hive -> ");
     Serial.print(binWeight);
     Serial.print(":");
     Serial.println(strlen(binWeight));
 
+    //state of hive move
     Serial.print("State of hive move -> ");
     Serial.println(movedHive);
 
-    char finalBinMessage[49] = {"000000000000000000000000000000000000000000000000"};
-    
+    //creating final message in binary
+    char finalBinMessage[49] = {"111000000000000000000000000000000000000000000000"};
+
+    //empty message
     Serial.println();
     Serial.println("Empty message:");
     Serial.print(finalBinMessage);
     Serial.print(":");
     Serial.println(strlen(finalBinMessage));
 
-    int i;
+    //filling the message with first temperature
     for(i = 0; i < 8; i++){
         if(i < strlen(binTemperature))finalBinMessage[47 - i] = binTemperature[(strlen(binTemperature)-1) - i];
     }
 
+    //filling the message with second temperature
     for(i = 0; i < 8; i++){
         if(i < strlen(binTemperature2))finalBinMessage[39 - i] = binTemperature2[(strlen(binTemperature2)-1) - i];
     }
 
+    //filling the message with first humidity
     for(i = 0; i < 7; i++){
         if(i < strlen(binHumidity))finalBinMessage[31 - i] = binHumidity[(strlen(binHumidity)-1) - i];
     }
 
+    //filling the message with second humidity
     for(i = 0; i < 7; i++){
         if(i < strlen(binHumidity2))finalBinMessage[24 - i] = binHumidity2[(strlen(binHumidity2)-1) - i];
     }
 
+    //filling the message with battery state
     for(i = 0; i < 7; i++){
         if(i < strlen(binPercentage))finalBinMessage[17 - i] = binPercentage[(strlen(binPercentage)-1) - i];
     }
 
+    //filling the message with hive weight
     for(i = 0; i < 7; i++){
         if(i < strlen(binWeight))finalBinMessage[10 - i] = binWeight[(strlen(binWeight)-1) - i];
     }
 
-    if(movedHive == true)finalBinMessage[0] = '1';
-    else finalBinMessage[0] = '0';
+    //filling the message with state of hive move
+    if(movedHive == true)finalBinMessage[3] = '1';
+    else finalBinMessage[3] = '0';
 
+    //final message
     Serial.println("Final message:");
     Serial.print(finalBinMessage);
     Serial.print(":");
     Serial.println(strlen(finalBinMessage));
 
-    int j = 0;   
-    char finalMessage[13] = {0};
-    
+    //convert final binary message to hexadecimal
+    j = 0;
+    strcpy(lastMessage, finalMessage);
+       
     for(i = 0; i < 48; i = i + 4){
       
-      String hexaDecimal = String(finalBinMessage);
+      hexaDecimal = String(finalBinMessage);
       hexaDecimal = hexaDecimal.substring(i, i+4);
-      int val = strtol(hexaDecimal.c_str(), NULL, 2);
+      val = strtol(hexaDecimal.c_str(), NULL, 2);
       
       Serial.print(hexaDecimal);
       Serial.print(":");
@@ -495,8 +518,11 @@ void messageConvert() {
       j++;
     }
 
-    Serial.println(finalMessage);
-    Serial3.print("AT$SF=");
-    Serial3.println(finalMessage);
+  //sending the message
+  if (!String(finalMessage).equals(String(lastMessage))) {
+      Serial.println(finalMessage);
+      Serial3.print("AT$SF=");
+      Serial3.println(finalMessage);
+   }
 }
 
