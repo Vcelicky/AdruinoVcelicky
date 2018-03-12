@@ -10,8 +10,21 @@
 #endif
 
 #define OUTPUT_READABLE_YAWPITCHROLL
-//#define OUTPUT_TEAPOT
 #define LED_PIN 13
+
+//define HX711 pins
+#define DT 50
+#define SCK 51
+
+////initialization of HX711
+HX711 scale(DT, SCK);
+
+//definition of variables for load sensor
+int weight = 0; 
+
+float calibration_factor = 2230; 
+float units;
+float ounces;
 
 //definition of variables for battery status
 float Aref = 1.41;   //1.2 or 1.315 1.415
@@ -49,6 +62,8 @@ int chk;
 void dmpDataReady() {
   mpuInterrupt = true;
 }
+
+//definition of variable for hive movement
 bool movedHive;
 
 //definition of variables for time measure
@@ -67,10 +82,6 @@ int humidity;
 int temperature;
 int humidity2;
 int temperature2;
-
-//definition of variables for load sensor
-HX711 scale(4, 5); 
-int weight; 
 
 //definition of variables for SigFox modem
 #define TX 12
@@ -176,6 +187,13 @@ void setup() {
   //set default state of hive
   movedHive = false;
 
+  //initialize HX711
+  scale.set_scale();
+  scale.tare();
+  long zero_factor = scale.read_average();
+  Serial.print("Zero factor: ");
+  Serial.println(zero_factor);
+  
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
@@ -219,7 +237,6 @@ void loop() {
       command = "";
     }
 
-    
     //measuring actual time
     currentTime = millis();
 
@@ -267,6 +284,14 @@ void loop() {
       voltage = total * Aref / 1024;
       percentage = (voltage - 5) * 25; //(voltage - 6) * 33.3
 
+      //measure weight
+      scale.set_scale(calibration_factor);
+      units = scale.get_units(), 10;
+      if (units < 0){
+        units = 0.00;
+      }
+      ounces = units * 0.035274;
+      
       //printing values
       Serial.println();
       Serial.println("--------------------------DHT22--------------------------");
@@ -314,6 +339,12 @@ void loop() {
       Serial.println(); 
       total = 0;
 
+      Serial.println("-------------------------Weight--------------------------");
+      Serial.print("Weight: ");
+      Serial.print(units);
+      Serial.println(" grams");
+      Serial.println("-------------------------Weight--------------------------");
+      
       Serial.println("-------------------------Message-------------------------");
       messageConvert();
       Serial.println("-------------------------Message-------------------------");
@@ -454,7 +485,6 @@ void messageConvert() {
     Serial.println(strlen(binPercentage));
 
     //converting weight of hive into binary
-    weight = 0; 
     itoa((byte)weight , binWeight, 2);
     Serial.print("Weight of hive -> ");
     Serial.print(binWeight);
