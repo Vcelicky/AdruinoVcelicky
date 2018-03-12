@@ -10,7 +10,6 @@
 #endif
 
 #define OUTPUT_READABLE_YAWPITCHROLL
-#define LED_PIN 13
 
 //define HX711 pins
 #define DT 50
@@ -63,6 +62,15 @@ void dmpDataReady() {
   mpuInterrupt = true;
 }
 
+//definition of variables for MPU6050 calibration
+int16_t ax, ay, az,gx, gy, gz;
+
+int mean_ax,mean_ay,mean_az,mean_gx,mean_gy,mean_gz,state=0;
+int ax_offset,ay_offset,az_offset,gx_offset,gy_offset,gz_offset;
+int buffersize=1000;   
+int acel_deadzone=8;
+int giro_deadzone=1;
+
 //definition of variable for hive movement
 bool movedHive;
 
@@ -101,8 +109,8 @@ char binTemperature2[9] = {0};
 char binHumidity[9] = {0}; 
 char binHumidity2[9] = {0};
 char binPercentage[9] = {0}; 
-char binWeight[9] = {0};     
-    
+char binWeight[9] = {0};      
+
 void setup() {
 
   interval = 600000; //normal = 600000 = 10 min
@@ -127,27 +135,56 @@ void setup() {
   mpu.initialize();
 
   //testing connection
+  Serial.println();
   Serial.println(F("Testing device connections"));
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-  //waiting for read any character
-  /*Serial.println(F("\nSend any character to begin: "));
-  while (Serial.available() && Serial.read());
-  while (!Serial.available());
-  while (Serial.available() && Serial.read());*/
   
   //load and configure the DMP
-  Serial.println(F("Initializing DMP..."));
+  Serial.println();
+  Serial.println(F("Initializing DMP"));
   devStatus = mpu.dmpInitialize();
 
-  //set gyro and accel offsets
-  mpu.setXAccelOffset(-607);
-  mpu.setYAccelOffset(1837);
-  mpu.setZAccelOffset(3750); //1788
+  //MPU6050 calibration 
+  Serial.println();
+  Serial.println("Starting calibration of MPU6050");
   
-  mpu.setXGyroOffset(22); //220
-  mpu.setYGyroOffset(56); //76
-  mpu.setZGyroOffset(5); //-85
+  //set gyro and accel offsets
+  mpu.setXAccelOffset(0);
+  mpu.setYAccelOffset(0);
+  mpu.setZAccelOffset(0);
+  mpu.setXGyroOffset(0);
+  mpu.setYGyroOffset(0);
+  mpu.setZGyroOffset(0);
+
+  Serial.println("Reading sensors for first time");
+  meansensors();
+  delay(1000);
+
+  Serial.println("Calculating offsets:");
+  calibration();
+  delay(1000);
+
+  meansensors();
+  Serial.println("\nFinished calibration of MPU6050");
+  Serial.print("Accelerometer X: ");
+  Serial.println(ax_offset); 
+  Serial.print("Accelerometer Y: ");
+  Serial.println(ay_offset); 
+  Serial.print("Accelerometer Z: ");
+  Serial.println(az_offset); 
+  Serial.print("Gyroskop X: ");
+  Serial.println(gx_offset); 
+  Serial.print("Gyroskop Y: ");
+  Serial.println(gy_offset); 
+  Serial.print("Gyroskop Z: ");
+  Serial.println(gz_offset); 
+  Serial.println();
+  mpu.setXAccelOffset(ax_offset);
+  mpu.setYAccelOffset(ay_offset);
+  mpu.setZAccelOffset(az_offset);
+  mpu.setXGyroOffset(gx_offset);
+  mpu.setYGyroOffset(gy_offset);
+  mpu.setZGyroOffset(gz_offset);
 
   //check if it work properly
   if (devStatus == 0) {
@@ -173,9 +210,6 @@ void setup() {
     Serial.println(F(")"));
   }
 
-  //setting control LED 
-  pinMode(LED_PIN, OUTPUT);
-
   //initialize devices
   dht.begin();
   dht2.begin();
@@ -191,6 +225,7 @@ void setup() {
   scale.set_scale();
   scale.tare();
   long zero_factor = scale.read_average();
+  Serial.println();
   Serial.print("Zero factor: ");
   Serial.println(zero_factor);
   
@@ -242,10 +277,6 @@ void loop() {
 
     //repeated every 10min
     if(currentTime >=  (startTime + interval + 500)){
-
-      //setting LED status
-      blinkState = !blinkState;
-      digitalWrite(LED_PIN, blinkState);
 
       //measuring first DHT22   
       humidity = dht.readHumidity();
@@ -571,5 +602,84 @@ void messageConvert() {
       Serial3.print("AT$SF=");
       Serial3.println(finalMessage);
    }
+}
+
+void meansensors(){
+  
+  long i=0, buff_ax=0, buff_ay=0, buff_az=0, buff_gx=0, buff_gy=0, buff_gz=0;
+
+  while (i < (buffersize + 101)){
+    
+    //read raw accel/gyro measurements from device
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    //first 100 measures are discarded
+    if((i > 100) && (i <= (buffersize+100))){ 
+      buff_ax = buff_ax + ax;
+      buff_ay = buff_ay + ay;
+      buff_az = buff_az + az;
+      buff_gx = buff_gx + gx;
+      buff_gy = buff_gy + gy;
+      buff_gz = buff_gz + gz;
+    }
+    if(i == (buffersize + 100)){
+      mean_ax = buff_ax / buffersize;
+      mean_ay = buff_ay / buffersize;
+      mean_az = buff_az / buffersize;
+      mean_gx = buff_gx / buffersize;
+      mean_gy = buff_gy / buffersize;
+      mean_gz = buff_gz / buffersize;
+    }
+    i++;
+    
+    //needed so we don't get repeated measures
+    delay(2); 
+  }
+}
+
+void calibration(){
+  ax_offset = -mean_ax / 8;
+  ay_offset = -mean_ay / 8;
+  az_offset = (16384-mean_az) / 8;
+
+  gx_offset = -mean_gx / 4;
+  gy_offset = -mean_gy / 4;
+  gz_offset = -mean_gz / 4;
+  
+  while (1){
+    
+    int ready=0;
+    
+    mpu.setXAccelOffset(ax_offset);
+    mpu.setYAccelOffset(ay_offset);
+    mpu.setZAccelOffset(az_offset);
+
+    mpu.setXGyroOffset(gx_offset);
+    mpu.setYGyroOffset(gy_offset);
+    mpu.setZGyroOffset(gz_offset);
+
+    meansensors();
+    Serial.print(".");
+
+    if(abs(mean_ax) <= acel_deadzone) ready++;
+    else ax_offset = ax_offset - mean_ax / acel_deadzone;
+    
+    if(abs(mean_ay) <= acel_deadzone) ready++;
+    else ay_offset = ay_offset - mean_ay / acel_deadzone;
+
+    if(abs(16384 - mean_az) <= acel_deadzone) ready++;
+    else az_offset = az_offset + (16384 - mean_az) / acel_deadzone;
+
+    if(abs(mean_gx) <= giro_deadzone) ready++;
+    else gx_offset = gx_offset - mean_gx / (giro_deadzone + 1);
+
+    if(abs(mean_gy) <= giro_deadzone) ready++;
+    else gy_offset = gy_offset - mean_gy / (giro_deadzone + 1);
+
+    if(abs(mean_gz) <= giro_deadzone) ready++;
+    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);
+
+    if(ready==6) break;
+  }
 }
 
