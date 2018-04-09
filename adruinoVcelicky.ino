@@ -19,11 +19,10 @@
 HX711 scale(DT, SCK);
 
 //definition of variables for load sensor
-int weight = 0; 
+float weight = 0;
+int weight2 = 0; 
 
-float calibration_factor = 2230; 
-float units;
-float ounces;
+float calibration_factor = -21740; 
 
 //definition of variables for battery status
 float Aref = 1.41;   //1.2 or 1.315 1.415
@@ -187,12 +186,8 @@ void setup() {
   movedHive = false;
 
   //initialize HX711
-  scale.set_scale();
+  scale.set_scale(-20000);
   scale.tare();
-  long zero_factor = scale.read_average();
-  Serial.println();
-  Serial.print("Zero factor: ");
-  Serial.println(zero_factor);
   
   //starting software serial link 
   Sigfox.begin(9600);
@@ -203,8 +198,15 @@ void loop() {
 
   //MPU6050 calibration 
   if(calibrationState == 0){
-    
-    Serial.println();
+
+    mpu.setXAccelOffset(-607);
+    mpu.setYAccelOffset(1837);
+    mpu.setZAccelOffset(3750);
+    mpu.setXGyroOffset(22);
+    mpu.setYGyroOffset(56);
+    mpu.setZGyroOffset(5);
+
+    /*Serial.println();
     Serial.println("Starting calibration of MPU6050");
  
     Serial.println("Reading sensors for first time");
@@ -213,9 +215,8 @@ void loop() {
     Serial.println("Calculating offsets:");
     calibration();
   
-    meansensors();
-    Serial.println("\nFinished calibration of MPU6050");
-    Serial.print("Accelerometer X: ");
+    //meansensors();
+    Serial.print("\nAccelerometer X: ");
     Serial.println(ax_offset); 
     Serial.print("Accelerometer Y: ");
     Serial.println(ay_offset); 
@@ -226,15 +227,15 @@ void loop() {
     Serial.print("Gyroskop Y: ");
     Serial.println(gy_offset); 
     Serial.print("Gyroskop Z: ");
-    Serial.println(gz_offset); 
-    Serial.println();
+    Serial.println(gz_offset);
+    Serial.println("Finished calibration of MPU6050");
 
     mpu.setXAccelOffset(ax_offset);
     mpu.setYAccelOffset(ay_offset);
     mpu.setZAccelOffset(az_offset);
-    mpu.setXGyroOffset(gx_offset);
+    /*mpu.setXGyroOffset(gx_offset);
     mpu.setYGyroOffset(gy_offset);
-    mpu.setZGyroOffset(gz_offset);
+    mpu.setZGyroOffset(gz_offset);*/
 
     calibrationState = 1;
   }
@@ -313,17 +314,12 @@ void loop() {
         total = total + analogRead(1);
       }
 
-      //converting input voltage to voltage and calculatio percentage
+      //converting input voltage to voltage and calculating percentage
       voltage = total * Aref / 1024;
       percentage = (voltage - 5) * 25; //(voltage - 6) * 33.3
 
       //measure weight
-      scale.set_scale(calibration_factor);
-      units = scale.get_units(), 10;
-      if (units < 0){
-        units = 0.00;
-      }
-      ounces = units * 0.035274;
+      weight = scale.get_units();
       
       //printing values
       Serial.println();
@@ -375,8 +371,8 @@ void loop() {
       
       Serial.println("-------------------------Weight--------------------------");
       Serial.print("Weight: ");
-      Serial.print(units);
-      Serial.println(" grams");
+      Serial.print(weight);
+      Serial.println(" kg");
       Serial.println("-------------------------Weight--------------------------");
             
       Serial.println("-------------------------Message-------------------------");
@@ -518,8 +514,10 @@ void messageConvert() {
     Serial.print(":");
     Serial.println(strlen(binPercentage));
 
-    //converting weight of hive into binary
-    itoa((byte)weight , binWeight, 2);
+    //converting weight of hive into binary 
+    weight2 = round(weight);
+    
+    itoa((byte)weight2 , binWeight, 2);
     Serial.print("Weight of hive -> ");
     Serial.print(binWeight);
     Serial.print(":");
@@ -621,17 +619,17 @@ void meansensors(){
       buff_ax = buff_ax + ax;
       buff_ay = buff_ay + ay;
       buff_az = buff_az + az;
-      buff_gx = buff_gx + gx;
+      /*buff_gx = buff_gx + gx;
       buff_gy = buff_gy + gy;
-      buff_gz = buff_gz + gz;
+      buff_gz = buff_gz + gz;*/
     }
     if(i == (buffersize + 100)){
       mean_ax = buff_ax / buffersize;
       mean_ay = buff_ay / buffersize;
       mean_az = buff_az / buffersize;
-      mean_gx = buff_gx / buffersize;
+      /*mean_gx = buff_gx / buffersize;
       mean_gy = buff_gy / buffersize;
-      mean_gz = buff_gz / buffersize;
+      mean_gz = buff_gz / buffersize;*/
     }
     i++;
     
@@ -645,9 +643,9 @@ void calibration(){
   ay_offset = -mean_ay / 8;
   az_offset = (16384-mean_az) / 8;
 
-  gx_offset = -mean_gx / 4;
+  /*gx_offset = -mean_gx / 4;
   gy_offset = -mean_gy / 4;
-  gz_offset = -mean_gz / 4;
+  gz_offset = -mean_gz / 4;*/
   
   while (1){
     
@@ -657,9 +655,10 @@ void calibration(){
     mpu.setYAccelOffset(ay_offset);
     mpu.setZAccelOffset(az_offset);
 
+    /*
     mpu.setXGyroOffset(gx_offset);
     mpu.setYGyroOffset(gy_offset);
-    mpu.setZGyroOffset(gz_offset);
+    mpu.setZGyroOffset(gz_offset);*/
 
     meansensors();
     Serial.print(".");
@@ -673,14 +672,14 @@ void calibration(){
     if(abs(16384 - mean_az) <= acel_deadzone) ready++;
     else az_offset = az_offset + (16384 - mean_az) / acel_deadzone;
 
-    if(abs(mean_gx) <= giro_deadzone) ready++;
+    /*if(abs(mean_gx) <= giro_deadzone) ready++;
     else gx_offset = gx_offset - mean_gx / (giro_deadzone + 1);
 
     if(abs(mean_gy) <= giro_deadzone) ready++;
     else gy_offset = gy_offset - mean_gy / (giro_deadzone + 1);
 
     if(abs(mean_gz) <= giro_deadzone) ready++;
-    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);
+    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);*/
 
     if(ready==6) break;
   }
