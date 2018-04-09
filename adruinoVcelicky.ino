@@ -186,7 +186,7 @@ void setup() {
   movedHive = false;
 
   //initialize HX711
-  scale.set_scale(-20000);
+  scale.set_scale(-21740);
   scale.tare();
   
   //starting software serial link 
