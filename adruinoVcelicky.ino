@@ -598,7 +598,8 @@ void messageConvert() {
     }
 
   //sending the message
-  if (!String(finalMessage).equals(String(lastMessage))) {
+//  if (!String(finalMessage).equals(String(lastMessage)))
+  {
       Serial.println(finalMessage);
       Serial3.print("AT$SF=");
       Serial3.println(finalMessage);
