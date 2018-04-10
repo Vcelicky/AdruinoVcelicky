@@ -515,7 +515,7 @@ void messageConvert() {
     Serial.println(strlen(binPercentage));
 
     //converting weight of hive into binary 
-    weight2 = round(weight);
+    weight2 = round(weight) + 24;
     
     itoa((byte)weight2 , binWeight, 2);
     Serial.print("Weight of hive -> ");
