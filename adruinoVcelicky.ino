@@ -10,11 +10,28 @@
 #endif
 
 #define OUTPUT_READABLE_YAWPITCHROLL
-//#define OUTPUT_TEAPOT
-#define LED_PIN 13
+
+//define HX711 pins
+#define DT 5
+#define SCK 4
+
+//leds signalization
+#define LED_ON 50 //Status ON
+#define LED_CL 51 //Status Calibration
+#define LED_SD 48 //Status Send
+
+////initialization of HX711
+HX711 scale(DT, SCK);
+
+//definition of variables for load sensor
+float weight = 0;
+int weight2 = 0; 
+
+float calibration_factor = -21740;
+float zero_factor = 318940; //318940 
 
 //definition of variables for battery status
-float Aref = 1.315;   //1.2 or 1.315
+float Aref = 1.41;   //1.2 or 1.315 1.415
 unsigned int total;
 float voltage;
 int percentage;
@@ -49,6 +66,16 @@ int chk;
 void dmpDataReady() {
   mpuInterrupt = true;
 }
+
+//definition of variables for MPU6050 calibration
+int16_t ax, ay, az,gx, gy, gz;
+
+int mean_ax,mean_ay,mean_az,mean_gx,mean_gy,mean_gz,state=0;
+int ax_offset,ay_offset,az_offset,gx_offset,gy_offset,gz_offset;
+int buffersize = 1000, acel_deadzone = 8, giro_deadzone = 1;
+int calibrationState = 0;
+
+//definition of variable for hive movement
 bool movedHive;
 
 //definition of variables for time measure
@@ -68,10 +95,6 @@ int temperature;
 int humidity2;
 int temperature2;
 
-//definition of variables for load sensor
-HX711 scale(4, 5); 
-int weight; 
-
 //definition of variables for SigFox modem
 #define TX 12
 #define RX 13
@@ -79,12 +102,22 @@ int weight;
 //initialization of software serial link
 SoftwareSerial Sigfox(RX, TX);
 
+//definition of variables for sending messagnes
 String command;
 String message;
 
+char finalMessage[13] = {0};
+char lastMessage[13] = {0};
+char binTemperature[9] = {0};
+char binTemperature2[9] = {0}; 
+char binHumidity[9] = {0}; 
+char binHumidity2[9] = {0};
+char binPercentage[9] = {0}; 
+char binWeight[9] = {0};      
+
 void setup() {
 
-  interval = 600000;
+  interval = 600000; //normal = 600000 = 10 min
   
   // use the internal ~1.1volt reference
   analogReference(INTERNAL1V1);
@@ -106,27 +139,22 @@ void setup() {
   mpu.initialize();
 
   //testing connection
+  Serial.println();
   Serial.println(F("Testing device connections"));
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-  //waiting for read any character
-  /*Serial.println(F("\nSend any character to begin: "));
-  while (Serial.available() && Serial.read());
-  while (!Serial.available());
-  while (Serial.available() && Serial.read());*/
   
   //load and configure the DMP
-  Serial.println(F("Initializing DMP..."));
+  Serial.println();
+  Serial.println(F("Initializing DMP"));
   devStatus = mpu.dmpInitialize();
-
+ 
   //set gyro and accel offsets
-  mpu.setXAccelOffset(-607);
-  mpu.setYAccelOffset(1837);
-  mpu.setZAccelOffset(3750); //1788
-  
-  mpu.setXGyroOffset(22); //220
-  mpu.setYGyroOffset(56); //76
-  mpu.setZGyroOffset(5); //-85
+  mpu.setXAccelOffset(0);
+  mpu.setYAccelOffset(0);
+  mpu.setZAccelOffset(0);
+  mpu.setXGyroOffset(0);
+  mpu.setYGyroOffset(0);
+  mpu.setZGyroOffset(0);
 
   //check if it work properly
   if (devStatus == 0) {
@@ -152,9 +180,6 @@ void setup() {
     Serial.println(F(")"));
   }
 
-  //setting control LED 
-  pinMode(LED_PIN, OUTPUT);
-
   //initialize devices
   dht.begin();
   dht2.begin();
@@ -166,13 +191,85 @@ void setup() {
   //set default state of hive
   movedHive = false;
 
+  //initialize HX711
+  scale.set_scale(-21740);
+  scale.set_offset(zero_factor);
+  //scale.tare();
+  
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
+
+  //initialize digital pin LED_ON, LED_CL, LED_SD as an output
+  pinMode(LED_ON, OUTPUT); 
+  pinMode(LED_CL, OUTPUT);
+  pinMode(LED_SD, OUTPUT);
 }
 
 void loop() {
 
+  //MPU6050 calibration 
+  
+  if(calibrationState == 0){
+
+    digitalWrite(LED_CL, HIGH);
+   
+    Serial.println();
+    Serial.println("Starting calibration of MPU6050");
+
+    if (state==0){
+      Serial.println("Reading sensors for first time");
+      meansensors();
+      state++;
+      delay(1000);
+    }
+
+    if(state==1){
+      Serial.println("Calculating offsets:");
+      //calibration();
+      state++;
+      delay(1000);
+    }
+
+    if (state==2) {
+      meansensors();
+        
+      Serial.print("\nAccelerometer X: ");
+      Serial.println(ax_offset); 
+      Serial.print("Accelerometer Y: ");
+      Serial.println(ay_offset); 
+      Serial.print("Accelerometer Z: ");
+      Serial.println(az_offset); 
+      Serial.print("Gyroskop X: ");
+      Serial.println(gx_offset); 
+      Serial.print("Gyroskop Y: ");
+      Serial.println(gy_offset); 
+      Serial.print("Gyroskop Z: ");
+      Serial.println(gz_offset);
+      Serial.println("Finished calibration of MPU6050");
+  
+      mpu.setXAccelOffset(ax_offset);
+      mpu.setYAccelOffset(ay_offset);
+      mpu.setZAccelOffset(az_offset);
+      mpu.setXGyroOffset(gx_offset);
+      mpu.setYGyroOffset(gy_offset);
+      mpu.setZGyroOffset(gz_offset);
+      
+      calibrationState = 1;
+      digitalWrite(LED_CL, LOW);
+      
+    }
+    
+    mpu.setXAccelOffset(-607);
+    mpu.setYAccelOffset(1837);
+    mpu.setZAccelOffset(3750);
+    mpu.setXGyroOffset(22);
+    mpu.setYGyroOffset(56);
+    mpu.setZGyroOffset(5);
+    
+  digitalWrite(LED_ON, HIGH);
+  }
+  
   //if program fails
   if (!dmpReady) {
     Serial.println("END");
@@ -181,17 +278,18 @@ void loop() {
     
   //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
-
     if (Serial3.available()) {
       message = Serial3.readString();
     }    
 
     message.trim();
     if(!message.equals("")){
+      digitalWrite(LED_ON, LOW);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       Serial.println(message);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       message = "";
+      digitalWrite(LED_ON, HIGH);
     }
     
     if (Serial.available()) {
@@ -200,6 +298,7 @@ void loop() {
   
     command.trim();
     if(!command.equals("")){
+      digitalWrite(LED_ON, LOW);
       Serial.println("----------------------SIGFOX-COMMAND---------------------");
       command = command + "\r";
       Serial.println(command);
@@ -207,19 +306,18 @@ void loop() {
       
       Serial3.println(command);
       command = "";
+      digitalWrite(LED_ON, HIGH);
     }
 
-    
     //measuring actual time
     currentTime = millis();
+   
+    //repeated every 10min
+    if((currentTime - startTime) >=  (interval + 500) || calibrationState == 1){
 
-    //repeated every 2s
-    if(currentTime >=  (startTime + interval + 500)){
-
-      //setting LED status
-      blinkState = !blinkState;
-      digitalWrite(LED_PIN, blinkState);
-
+      digitalWrite(LED_ON, LOW);
+      calibrationState = 2;
+      
       //measuring first DHT22   
       humidity = dht.readHumidity();
       temperature = dht.readTemperature();
@@ -228,6 +326,23 @@ void loop() {
       humidity2 = dht2.readHumidity();
       temperature2 = dht2.readTemperature();
 
+      //checking measuremts from DHT22s
+      if((humidity < 0) || (humidity > 100)){
+        humidity = 127;
+      }
+
+      if((temperature < -50) || (temperature > 80)){
+        temperature = 127;
+      }
+      
+      if((humidity2 < 0) || (humidity2 > 100)){
+        humidity2 = 127; 
+      }
+      
+      if((temperature2 < -50) || (temperature2 > 80)){
+        temperature2 = 127;
+      }
+       
       //reading value from analog input to clear old input
       analogRead(1);
 
@@ -236,24 +351,27 @@ void loop() {
         total = total + analogRead(1);
       }
 
-      //converting input voltage to voltage and calculatio percentage
+      //converting input voltage to voltage and calculating percentage
       voltage = total * Aref / 1024;
-      percentage = (voltage - 6) * 33.3;
+      percentage = (voltage - 6) * 33.3; //(voltage - 6) * 33.3
 
+      //measure weight
+      weight = scale.get_units();
+      
       //printing values
       Serial.println();
       Serial.println("--------------------------DHT22--------------------------");
-      Serial.print("Humidity(IN): ");
+      Serial.print("Humidity(OUT): ");
       Serial.print(humidity);
     
-      Serial.print(" %, Temperature(IN): ");
+      Serial.print(" %, Temperature(OUT): ");
       Serial.print(temperature);
       Serial.println(" C");
     
-      Serial.print("Humidity(OUT): ");
+      Serial.print("Humidity(IN): ");
       Serial.print(humidity2);
     
-      Serial.print(" %, Temperature(OUT): ");
+      Serial.print(" %, Temperature(IN): ");
       Serial.print(temperature2);
       Serial.println(" C");
       Serial.println("--------------------------DHT22--------------------------");
@@ -287,12 +405,20 @@ void loop() {
       Serial.println(); 
       total = 0;
 
+      
+      Serial.println("-------------------------Weight--------------------------");
+      Serial.print("Weight: ");
+      Serial.print(weight);
+      Serial.println(" kg");
+      Serial.println("-------------------------Weight--------------------------");
+            
       Serial.println("-------------------------Message-------------------------");
       messageConvert();
       Serial.println("-------------------------Message-------------------------");
       
       //measuring actual time
       startTime = millis();
+      digitalWrite(LED_ON, HIGH);
     }
   }
 
@@ -311,7 +437,7 @@ void loop() {
 
   //checking for DMP data ready interrupt
   else if (mpuIntStatus & 0x02) {
-
+    
     //read a packet from FIFO
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
     mpu.getFIFOBytes(fifoBuffer, packetSize);
@@ -323,10 +449,22 @@ void loop() {
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
-        currentTimeAkc = millis();
-        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + interval)))
-        {
+        //Wait for 2 minutes while accel beacome stabil
+        if(millis() - startTimeWaitAkc>= 120000){
+          //check for hive movement
+          if(movedHive == false){
+              if((ypr[1] * 180 / M_PI > 10) || (ypr[2] * 180 / M_PI > 10)  || (ypr[1] * 180 / M_PI < -10) || (ypr[2] * 180 / M_PI < -10)){
+                movedHive = true;
+              }
+          }
+        }
 
+        //check if interval was reached
+        currentTimeAkc = millis();
+        if((currentTimeAkc - startTimeAkc) >= interval) //(startTimeWaitAkc - millis() >= 10000) && 
+        {
+          
+          digitalWrite(LED_ON, LOW);
           Serial.println();
           Serial.println("----------------------Accelerometer----------------------");
           //Serial.print("Z:  ");
@@ -338,12 +476,7 @@ void loop() {
           Serial.println("°");
 
           if(movedHive == false){
-            
-            if((ypr[1] * 180 / M_PI > 8) || (ypr[2] * 180 / M_PI > 8)  || (ypr[1] * 180 / M_PI < -8) || (ypr[2] * 180 / M_PI < -8)){
-              movedHive = true;
-              Serial.println("State: hive was moved");
-            }
-            else Serial.println("State: hive is on right place");          
+            Serial.println("State: hive is on right place");          
           }
           else Serial.println("State: hive was moved");
           
@@ -352,29 +485,21 @@ void loop() {
           Serial.println();
 
           startTimeAkc = millis();
+          digitalWrite(LED_ON, HIGH);
         }
-    #endif
-  
-    #ifdef OUTPUT_TEAPOT
-        teapotPacket[2] = fifoBuffer[0];
-        teapotPacket[3] = fifoBuffer[1];
-        teapotPacket[4] = fifoBuffer[4];
-        teapotPacket[5] = fifoBuffer[5];
-        teapotPacket[6] = fifoBuffer[8];
-        teapotPacket[7] = fifoBuffer[9];
-        teapotPacket[8] = fifoBuffer[12];
-        teapotPacket[9] = fifoBuffer[13];
-        Serial.write(teapotPacket, 14);
-        teapotPacket[11]++;
     #endif
   }
 }
 
 void messageConvert() {
-  
-    Serial.println();
-    char binTemperature[9] = {0};
     
+    int j, i, val;
+    String hexaDecimal;
+        
+    Serial.println();
+
+    //digitalWrite(LED_SD, HIGH);
+    //converting first temperature into binary
     if(temperature < 0){
       temperature = (-temperature) + 128;
       itoa((byte) temperature, binTemperature, 2);
@@ -388,8 +513,7 @@ void messageConvert() {
     Serial.print(":");
     Serial.println(strlen(binTemperature));
 
-    char binTemperature2[9] = {0}; 
-    
+    //converting second temperature into binary
     if(temperature2 < 0){
       temperature2 = (-temperature2) + 128;
       itoa((byte) temperature2, binTemperature2, 2);
@@ -403,87 +527,99 @@ void messageConvert() {
     Serial.print(":");
     Serial.println(strlen(binTemperature2));
 
-    char binHumidity[9] = {0}; 
+    //converting first humidity into binary
     itoa((byte) humidity, binHumidity, 2);
     Serial.print("Outside humidity -> ");
     Serial.print(binHumidity);
     Serial.print(":");
     Serial.println(strlen(binHumidity));
 
-    char binHumidity2[9] = {0}; 
+    //converting second humidity into binary
     itoa((byte) humidity2, binHumidity2, 2);
     Serial.print("Inside humidity -> ");
     Serial.print(binHumidity2);
     Serial.print(":");
     Serial.println(strlen(binHumidity2));
 
-    char binPercentage[9] = {0}; 
+    //converting battery state into binary
     itoa((byte) percentage, binPercentage, 2);
     Serial.print("Battery percentage -> ");
     Serial.print(binPercentage);
     Serial.print(":");
     Serial.println(strlen(binPercentage));
 
-    weight = 0;
-    char binWeight[9] = {0}; 
-    itoa((byte)weight , binWeight, 2);
+    //converting weight of hive into binary 
+    weight2 = round(weight);
+    
+    itoa((byte)weight2 , binWeight, 2);
     Serial.print("Weight of hive -> ");
     Serial.print(binWeight);
     Serial.print(":");
     Serial.println(strlen(binWeight));
 
+    //state of hive move
     Serial.print("State of hive move -> ");
     Serial.println(movedHive);
 
-    char finalBinMessage[49] = {"000000000000000000000000000000000000000000000000"};
-    
+    //creating final message in binary
+    char finalBinMessage[49] = {"111000000000000000000000000000000000000000000000"};
+
+    //empty message
     Serial.println();
     Serial.println("Empty message:");
     Serial.print(finalBinMessage);
     Serial.print(":");
     Serial.println(strlen(finalBinMessage));
 
-    int i;
+    //filling the message with first temperature
     for(i = 0; i < 8; i++){
         if(i < strlen(binTemperature))finalBinMessage[47 - i] = binTemperature[(strlen(binTemperature)-1) - i];
     }
 
+    //filling the message with second temperature
     for(i = 0; i < 8; i++){
         if(i < strlen(binTemperature2))finalBinMessage[39 - i] = binTemperature2[(strlen(binTemperature2)-1) - i];
     }
 
+    //filling the message with first humidity
     for(i = 0; i < 7; i++){
         if(i < strlen(binHumidity))finalBinMessage[31 - i] = binHumidity[(strlen(binHumidity)-1) - i];
     }
 
+    //filling the message with second humidity
     for(i = 0; i < 7; i++){
         if(i < strlen(binHumidity2))finalBinMessage[24 - i] = binHumidity2[(strlen(binHumidity2)-1) - i];
     }
 
+    //filling the message with battery state
     for(i = 0; i < 7; i++){
         if(i < strlen(binPercentage))finalBinMessage[17 - i] = binPercentage[(strlen(binPercentage)-1) - i];
     }
 
+    //filling the message with hive weight
     for(i = 0; i < 7; i++){
         if(i < strlen(binWeight))finalBinMessage[10 - i] = binWeight[(strlen(binWeight)-1) - i];
     }
 
-    if(movedHive == true)finalBinMessage[0] = '1';
-    else finalBinMessage[0] = '0';
+    //filling the message with state of hive move
+    if(movedHive == true)finalBinMessage[3] = '1';
+    else finalBinMessage[3] = '0';
 
+    //final message
     Serial.println("Final message:");
     Serial.print(finalBinMessage);
     Serial.print(":");
     Serial.println(strlen(finalBinMessage));
 
-    int j = 0;   
-    char finalMessage[13] = {0};
-    
+    //convert final binary message to hexadecimal
+    j = 0;
+    strcpy(lastMessage, finalMessage);
+       
     for(i = 0; i < 48; i = i + 4){
       
-      String hexaDecimal = String(finalBinMessage);
+      hexaDecimal = String(finalBinMessage);
       hexaDecimal = hexaDecimal.substring(i, i+4);
-      int val = strtol(hexaDecimal.c_str(), NULL, 2);
+      val = strtol(hexaDecimal.c_str(), NULL, 2);
       
       Serial.print(hexaDecimal);
       Serial.print(":");
@@ -495,8 +631,95 @@ void messageConvert() {
       j++;
     }
 
-    Serial.println(finalMessage);
-    Serial3.print("AT$SF=");
-    Serial3.println(finalMessage);
+  //sending the message
+  if (!String(finalMessage).equals(String(lastMessage)))
+   {  
+      digitalWrite(LED_SD, HIGH);
+      Serial.println(finalMessage);
+      Serial3.print("AT$SF=");
+      Serial3.println(finalMessage);
+      delay(200);
+      digitalWrite(LED_SD, LOW);
+   }
+}
+
+void meansensors(){
+  
+  long i=0, buff_ax=0, buff_ay=0, buff_az=0, buff_gx=0, buff_gy=0, buff_gz=0;
+
+  while (i < (buffersize + 101)){
+    
+    //read raw accel/gyro measurements from device
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    //first 100 measures are discarded
+    if((i > 100) && (i <= (buffersize+100))){ 
+      buff_ax = buff_ax + ax;
+      buff_ay = buff_ay + ay;
+      buff_az = buff_az + az;
+      buff_gx = buff_gx + gx;
+      buff_gy = buff_gy + gy;
+      buff_gz = buff_gz + gz;
+    }
+    if(i == (buffersize + 100)){
+      mean_ax = buff_ax / buffersize;
+      mean_ay = buff_ay / buffersize;
+      mean_az = buff_az / buffersize;
+      mean_gx = buff_gx / buffersize;
+      mean_gy = buff_gy / buffersize;
+      mean_gz = buff_gz / buffersize;
+    }
+    i++;
+    
+    //needed so we don't get repeated measures
+    delay(2); 
+  }
+}
+
+void calibration(){
+  ax_offset = -mean_ax / 8;
+  ay_offset = -mean_ay / 8;
+  az_offset = (16384-mean_az) / 8;
+
+  gx_offset = -mean_gx / 4;
+  gy_offset = -mean_gy / 4;
+  gz_offset = -mean_gz / 4;
+  
+  while (1){
+    
+    int ready=0;
+    
+    mpu.setXAccelOffset(ax_offset);
+    mpu.setYAccelOffset(ay_offset);
+    mpu.setZAccelOffset(az_offset);
+
+    
+    mpu.setXGyroOffset(gx_offset);
+    mpu.setYGyroOffset(gy_offset);
+    mpu.setZGyroOffset(gz_offset);
+
+    meansensors();
+    Serial.print(".");
+
+    if(abs(mean_ax) <= acel_deadzone) ready++;
+    else ax_offset = ax_offset - mean_ax / acel_deadzone;
+    
+    if(abs(mean_ay) <= acel_deadzone) ready++;
+    else ay_offset = ay_offset - mean_ay / acel_deadzone;
+
+    if(abs(16384 - mean_az) <= acel_deadzone) ready++;
+    else az_offset = az_offset + (16384 - mean_az) / acel_deadzone;
+
+    if(abs(mean_gx) <= giro_deadzone) ready++;
+    else gx_offset = gx_offset - mean_gx / (giro_deadzone + 1);
+
+    if(abs(mean_gy) <= giro_deadzone) ready++;
+    else gy_offset = gy_offset - mean_gy / (giro_deadzone + 1);
+
+    if(abs(mean_gz) <= giro_deadzone) ready++;
+    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);
+
+    if(ready==6) break;
+  }
 }
 
