@@ -1,4 +1,4 @@
-  //libraries definition
+//libraries definition
 #include <DHT.h>
 #include <SoftwareSerial.h>
 #include "I2Cdev.h"
@@ -12,8 +12,13 @@
 #define OUTPUT_READABLE_YAWPITCHROLL
 
 //define HX711 pins
-#define DT 50
-#define SCK 51
+#define DT 5
+#define SCK 4
+
+//leds signalization
+#define LED_ON 50 //Status ON
+#define LED_CL 51 //Status Calibration
+#define LED_SD 48 //Status Send
 
 ////initialization of HX711
 HX711 scale(DT, SCK);
@@ -22,7 +27,8 @@ HX711 scale(DT, SCK);
 float weight = 0;
 int weight2 = 0; 
 
-float calibration_factor = -21740; 
+float calibration_factor = -21740;
+float zero_factor = 318940; //318940 
 
 //definition of variables for battery status
 float Aref = 1.41;   //1.2 or 1.315 1.415
@@ -187,59 +193,83 @@ void setup() {
 
   //initialize HX711
   scale.set_scale(-21740);
-  scale.tare();
+  scale.set_offset(zero_factor);
+  //scale.tare();
   
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
+
+  //initialize digital pin LED_ON, LED_CL, LED_SD as an output
+  pinMode(LED_ON, OUTPUT); 
+  pinMode(LED_CL, OUTPUT);
+  pinMode(LED_SD, OUTPUT);
 }
 
 void loop() {
 
   //MPU6050 calibration 
+  
   if(calibrationState == 0){
 
+    digitalWrite(LED_CL, HIGH);
+   
+    Serial.println();
+    Serial.println("Starting calibration of MPU6050");
+
+    if (state==0){
+      Serial.println("Reading sensors for first time");
+      meansensors();
+      state++;
+      delay(1000);
+    }
+
+    if(state==1){
+      Serial.println("Calculating offsets:");
+      //calibration();
+      state++;
+      delay(1000);
+    }
+
+    if (state==2) {
+      meansensors();
+        
+      Serial.print("\nAccelerometer X: ");
+      Serial.println(ax_offset); 
+      Serial.print("Accelerometer Y: ");
+      Serial.println(ay_offset); 
+      Serial.print("Accelerometer Z: ");
+      Serial.println(az_offset); 
+      Serial.print("Gyroskop X: ");
+      Serial.println(gx_offset); 
+      Serial.print("Gyroskop Y: ");
+      Serial.println(gy_offset); 
+      Serial.print("Gyroskop Z: ");
+      Serial.println(gz_offset);
+      Serial.println("Finished calibration of MPU6050");
+  
+      mpu.setXAccelOffset(ax_offset);
+      mpu.setYAccelOffset(ay_offset);
+      mpu.setZAccelOffset(az_offset);
+      mpu.setXGyroOffset(gx_offset);
+      mpu.setYGyroOffset(gy_offset);
+      mpu.setZGyroOffset(gz_offset);
+      
+      calibrationState = 1;
+      digitalWrite(LED_CL, LOW);
+      
+    }
+    
     mpu.setXAccelOffset(-607);
     mpu.setYAccelOffset(1837);
     mpu.setZAccelOffset(3750);
     mpu.setXGyroOffset(22);
     mpu.setYGyroOffset(56);
     mpu.setZGyroOffset(5);
-
-    /*Serial.println();
-    Serial.println("Starting calibration of MPU6050");
- 
-    Serial.println("Reading sensors for first time");
-    meansensors();
-  
-    Serial.println("Calculating offsets:");
-    calibration();
-  
-    //meansensors();
-    Serial.print("\nAccelerometer X: ");
-    Serial.println(ax_offset); 
-    Serial.print("Accelerometer Y: ");
-    Serial.println(ay_offset); 
-    Serial.print("Accelerometer Z: ");
-    Serial.println(az_offset); 
-    Serial.print("Gyroskop X: ");
-    Serial.println(gx_offset); 
-    Serial.print("Gyroskop Y: ");
-    Serial.println(gy_offset); 
-    Serial.print("Gyroskop Z: ");
-    Serial.println(gz_offset);
-    Serial.println("Finished calibration of MPU6050");
-
-    mpu.setXAccelOffset(ax_offset);
-    mpu.setYAccelOffset(ay_offset);
-    mpu.setZAccelOffset(az_offset);
-    /*mpu.setXGyroOffset(gx_offset);
-    mpu.setYGyroOffset(gy_offset);
-    mpu.setZGyroOffset(gz_offset);*/
-
-    calibrationState = 1;
+    
+  digitalWrite(LED_ON, HIGH);
   }
- 
+  
   //if program fails
   if (!dmpReady) {
     Serial.println("END");
@@ -254,10 +284,12 @@ void loop() {
 
     message.trim();
     if(!message.equals("")){
+      digitalWrite(LED_ON, LOW);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       Serial.println(message);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       message = "";
+      digitalWrite(LED_ON, HIGH);
     }
     
     if (Serial.available()) {
@@ -266,6 +298,7 @@ void loop() {
   
     command.trim();
     if(!command.equals("")){
+      digitalWrite(LED_ON, LOW);
       Serial.println("----------------------SIGFOX-COMMAND---------------------");
       command = command + "\r";
       Serial.println(command);
@@ -273,14 +306,18 @@ void loop() {
       
       Serial3.println(command);
       command = "";
+      digitalWrite(LED_ON, HIGH);
     }
 
     //measuring actual time
     currentTime = millis();
-
+   
     //repeated every 10min
-    if(currentTime >=  (startTime + interval + 500)){
+    if((currentTime - startTime) >=  (interval + 500) || calibrationState == 1){
 
+      digitalWrite(LED_ON, LOW);
+      calibrationState = 2;
+      
       //measuring first DHT22   
       humidity = dht.readHumidity();
       temperature = dht.readTemperature();
@@ -316,7 +353,7 @@ void loop() {
 
       //converting input voltage to voltage and calculating percentage
       voltage = total * Aref / 1024;
-      percentage = (voltage - 5) * 25; //(voltage - 6) * 33.3
+      percentage = (voltage - 6) * 33.3; //(voltage - 6) * 33.3
 
       //measure weight
       weight = scale.get_units();
@@ -381,6 +418,7 @@ void loop() {
       
       //measuring actual time
       startTime = millis();
+      digitalWrite(LED_ON, HIGH);
     }
   }
 
@@ -399,7 +437,7 @@ void loop() {
 
   //checking for DMP data ready interrupt
   else if (mpuIntStatus & 0x02) {
-
+    
     //read a packet from FIFO
     while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
     mpu.getFIFOBytes(fifoBuffer, packetSize);
@@ -411,10 +449,22 @@ void loop() {
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
-        currentTimeAkc = millis();
-        if((millis() > startTimeWaitAkc + 10000) && (currentTimeAkc >= (startTimeAkc + interval)))
-        {
+        //Wait for 2 minutes while accel beacome stabil
+        if(millis() - startTimeWaitAkc>= 120000){
+          //check for hive movement
+          if(movedHive == false){
+              if((ypr[1] * 180 / M_PI > 10) || (ypr[2] * 180 / M_PI > 10)  || (ypr[1] * 180 / M_PI < -10) || (ypr[2] * 180 / M_PI < -10)){
+                movedHive = true;
+              }
+          }
+        }
 
+        //check if interval was reached
+        currentTimeAkc = millis();
+        if((currentTimeAkc - startTimeAkc) >= interval) //(startTimeWaitAkc - millis() >= 10000) && 
+        {
+          
+          digitalWrite(LED_ON, LOW);
           Serial.println();
           Serial.println("----------------------Accelerometer----------------------");
           //Serial.print("Z:  ");
@@ -426,12 +476,7 @@ void loop() {
           Serial.println("°");
 
           if(movedHive == false){
-            
-            if((ypr[1] * 180 / M_PI > 8) || (ypr[2] * 180 / M_PI > 8)  || (ypr[1] * 180 / M_PI < -8) || (ypr[2] * 180 / M_PI < -8)){
-              movedHive = true;
-              Serial.println("State: hive was moved");
-            }
-            else Serial.println("State: hive is on right place");          
+            Serial.println("State: hive is on right place");          
           }
           else Serial.println("State: hive was moved");
           
@@ -440,31 +485,20 @@ void loop() {
           Serial.println();
 
           startTimeAkc = millis();
+          digitalWrite(LED_ON, HIGH);
         }
-    #endif
-  
-    #ifdef OUTPUT_TEAPOT
-        teapotPacket[2] = fifoBuffer[0];
-        teapotPacket[3] = fifoBuffer[1];
-        teapotPacket[4] = fifoBuffer[4];
-        teapotPacket[5] = fifoBuffer[5];
-        teapotPacket[6] = fifoBuffer[8];
-        teapotPacket[7] = fifoBuffer[9];
-        teapotPacket[8] = fifoBuffer[12];
-        teapotPacket[9] = fifoBuffer[13];
-        Serial.write(teapotPacket, 14);
-        teapotPacket[11]++;
     #endif
   }
 }
 
 void messageConvert() {
-
+    
     int j, i, val;
     String hexaDecimal;
-    
+        
     Serial.println();
 
+    //digitalWrite(LED_SD, HIGH);
     //converting first temperature into binary
     if(temperature < 0){
       temperature = (-temperature) + 128;
@@ -515,7 +549,7 @@ void messageConvert() {
     Serial.println(strlen(binPercentage));
 
     //converting weight of hive into binary 
-    weight2 = round(weight) + 24;
+    weight2 = round(weight);
     
     itoa((byte)weight2 , binWeight, 2);
     Serial.print("Weight of hive -> ");
@@ -598,11 +632,14 @@ void messageConvert() {
     }
 
   //sending the message
-//  if (!String(finalMessage).equals(String(lastMessage)))
-  {
+  if (!String(finalMessage).equals(String(lastMessage)))
+   {  
+      digitalWrite(LED_SD, HIGH);
       Serial.println(finalMessage);
       Serial3.print("AT$SF=");
       Serial3.println(finalMessage);
+      delay(200);
+      digitalWrite(LED_SD, LOW);
    }
 }
 
@@ -620,17 +657,17 @@ void meansensors(){
       buff_ax = buff_ax + ax;
       buff_ay = buff_ay + ay;
       buff_az = buff_az + az;
-      /*buff_gx = buff_gx + gx;
+      buff_gx = buff_gx + gx;
       buff_gy = buff_gy + gy;
-      buff_gz = buff_gz + gz;*/
+      buff_gz = buff_gz + gz;
     }
     if(i == (buffersize + 100)){
       mean_ax = buff_ax / buffersize;
       mean_ay = buff_ay / buffersize;
       mean_az = buff_az / buffersize;
-      /*mean_gx = buff_gx / buffersize;
+      mean_gx = buff_gx / buffersize;
       mean_gy = buff_gy / buffersize;
-      mean_gz = buff_gz / buffersize;*/
+      mean_gz = buff_gz / buffersize;
     }
     i++;
     
@@ -644,9 +681,9 @@ void calibration(){
   ay_offset = -mean_ay / 8;
   az_offset = (16384-mean_az) / 8;
 
-  /*gx_offset = -mean_gx / 4;
+  gx_offset = -mean_gx / 4;
   gy_offset = -mean_gy / 4;
-  gz_offset = -mean_gz / 4;*/
+  gz_offset = -mean_gz / 4;
   
   while (1){
     
@@ -656,10 +693,10 @@ void calibration(){
     mpu.setYAccelOffset(ay_offset);
     mpu.setZAccelOffset(az_offset);
 
-    /*
+    
     mpu.setXGyroOffset(gx_offset);
     mpu.setYGyroOffset(gy_offset);
-    mpu.setZGyroOffset(gz_offset);*/
+    mpu.setZGyroOffset(gz_offset);
 
     meansensors();
     Serial.print(".");
@@ -673,14 +710,14 @@ void calibration(){
     if(abs(16384 - mean_az) <= acel_deadzone) ready++;
     else az_offset = az_offset + (16384 - mean_az) / acel_deadzone;
 
-    /*if(abs(mean_gx) <= giro_deadzone) ready++;
+    if(abs(mean_gx) <= giro_deadzone) ready++;
     else gx_offset = gx_offset - mean_gx / (giro_deadzone + 1);
 
     if(abs(mean_gy) <= giro_deadzone) ready++;
     else gy_offset = gy_offset - mean_gy / (giro_deadzone + 1);
 
     if(abs(mean_gz) <= giro_deadzone) ready++;
-    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);*/
+    else gz_offset = gz_offset - mean_gz / (giro_deadzone + 1);
 
     if(ready==6) break;
   }
