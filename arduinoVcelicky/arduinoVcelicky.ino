@@ -32,15 +32,16 @@ float zero_factor = 318940; //318940
 
 //definition of variables for battery status
 #define CHARGER_CONTROL 49
-#define NUM_SAMPLES 10
-#define DIODE_DROP 0.87
+#define NUM_SAMPLES 100
+#define DIODE_DROP 0.733
 float lowVoltage = 13.5;
 float highVoltage = 13.8;
-float Vcc = 4.97;
+float highCurrent = 0.45;
+float Vcc = 5.1;
 //Division factor is calculated as follows: divFactor = Vin / V10k
 //Vin is the input voltage
 //V10k id the voltage on 10k resistor
-float divisionFactor = 16.379;
+float divisionFactor = 17;
 float Aref = 1.41;   //1.2 or 1.315 1.415
 int total = 0;
 int sample = 0;
@@ -97,7 +98,8 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
-long int interval;
+unsigned long startTimeVA;
+long int interval, intervalVA;
 
 //definition of variables for DHT22
 DHT dhtOut(52, DHT22);
@@ -131,6 +133,7 @@ char binWeight[9] = {0};
 void setup() {
 
   interval = 600000; //normal = 600000 = 10 min
+  intervalVA = 30000;
   
   // use the internal ~1.1volt reference
   //analogReference(INTERNAL1V1);
@@ -212,6 +215,7 @@ void setup() {
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
+  delay(1000);
 
   //initialize digital pin LED_ON, LED_CL, LED_SD as an output
   pinMode(LED_ON, OUTPUT); 
@@ -305,6 +309,7 @@ void loop() {
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       Serial.println(message);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
+
       message = "";
       digitalWrite(LED_ON, HIGH);
     }
@@ -328,7 +333,77 @@ void loop() {
 
     //measuring actual time
     currentTime = millis();
-   
+
+    if((currentTime - startTimeVA) >= (intervalVA + 500)){
+      Serial.println("Measuring voltage on battery and charging current");
+      
+      //reading value from analog input to clear old input
+      analogRead(A1);
+  
+      //measuring input voltage
+      total = 0;
+      sample_count = 0;
+      while(sample_count < NUM_SAMPLES){
+        sample = analogRead(A1);
+        //Serial.println(sample);
+        total += sample;
+        sample_count++;
+        delay(2);
+      }
+
+      //converting input voltage to voltage and calculating percentage
+      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1023.0;
+      Serial.print("Voltage on 10k resistor: ");
+      Serial.print(voltage);
+      Serial.println(" V");
+      voltage *= divisionFactor;
+      voltage += DIODE_DROP;
+      Serial.print("Voltage on battery: ");
+      Serial.print(voltage);
+      Serial.println(" V");
+
+      //100% / difference between actual voltage and 0% voltage gives volts per %
+      percentage = (voltage - 11) * (100 / (highVoltage - 11)); 
+      Serial.print("Percentage: ");
+      Serial.print(percentage);
+      Serial.println(" %");
+
+      if (voltage < lowVoltage){
+        Serial.println("Battery is charging...");
+        digitalWrite(CHARGER_CONTROL, HIGH);
+      }
+      else if(voltage >= highVoltage){
+        Serial.println("Battery is fully charged");
+        digitalWrite(CHARGER_CONTROL, LOW);
+      }
+
+      //measuring current flowing from solar panel to battery
+      analogRead(A2);
+      total = 0;
+      sample_count = 0;
+      while(sample_count < NUM_SAMPLES){
+        sample = analogRead(A2);
+        //Serial.println(sample);
+        total += sample;
+        sample_count++;
+        delay(2);
+      }
+      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1023.0) - 2.5) * 10);
+      Serial.print("Current flowing to battery: ");
+      Serial.print(current);
+      Serial.println(" A");
+
+      if (current >= highCurrent){
+        Serial.println("Charging current is too high, disconnecting charger");
+        digitalWrite(CHARGER_CONTROL, LOW);
+      }
+      else{
+        digitalWrite(CHARGER_CONTROL, HIGH);
+      }
+      
+      startTimeVA = millis();
+    }
+    
     //repeated every 10min
     if((currentTime - startTime) >=  (interval + 500) || calibrationState == 1){
 
@@ -368,14 +443,14 @@ void loop() {
       sample_count = 0;
       while(sample_count < NUM_SAMPLES){
         sample = analogRead(A1);
-        Serial.println(sample);
+        //Serial.println(sample);
         total += sample;
         sample_count++;
-        delay(10);
+        delay(2);
       }
 
       //converting input voltage to voltage and calculating percentage
-      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1024.0;
+      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1023.0;
       Serial.print("Voltage on 10k resistor: ");
       Serial.print(voltage);
       Serial.println(" V");
@@ -387,9 +462,11 @@ void loop() {
 
       if (voltage < lowVoltage){
         digitalWrite(CHARGER_CONTROL, HIGH);
+        Serial.println("Battery is charging...");
       }
       else if(voltage >= highVoltage){
         digitalWrite(CHARGER_CONTROL, LOW);
+        Serial.println("Battery is fully charged");
       }
 
       //100% / difference between actual voltage and 0% voltage gives volts per %
@@ -401,12 +478,12 @@ void loop() {
       sample_count = 0;
       while(sample_count < NUM_SAMPLES){
         sample = analogRead(A2);
-        Serial.println(sample);
+        //Serial.println(sample);
         total += sample;
         sample_count++;
-        delay(10);
+        delay(2);
       }
-      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1024.0) - 2.5) * 10);
+      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1023.0) - 2.5) * 10);
       Serial.print("Current flowing to battery: ");
       Serial.print(current);
       Serial.println(" A");
@@ -706,9 +783,10 @@ void messageConvert() {
    {  
       digitalWrite(LED_SD, HIGH);
       Serial.println(finalMessage);
-      Serial3.print("AT$SF=");
-      Serial3.println(finalMessage);
+      Sigfox.print("AT$SF=");
+      Sigfox.println(finalMessage);
       delay(200);
+      Serial.println("Message has been sent");
       digitalWrite(LED_SD, LOW);
    }
 }
