@@ -9,6 +9,12 @@
 #include "Wire.h"
 #endif
 
+
+// libs and variables for sleep functionality
+#include <avr/sleep.h>
+#include <avr/power.h>
+#include <avr/wdt.h>
+
 #define OUTPUT_READABLE_YAWPITCHROLL
 
 //define HX711 pins
@@ -32,18 +38,17 @@ float zero_factor = 318940; //318940
 
 //definition of variables for battery status
 #define CHARGER_CONTROL 49
-#define NUM_SAMPLES 100
-#define DIODE_DROP 0.681
+#define NUM_SAMPLES 10
+#define DIODE_DROP 0.87
 float lowVoltage = 13.5;
 float highVoltage = 13.8;
-float highCurrent = 0.45;
-float Vcc = 4.96;
+float Vcc = 4.97;
 //Division factor is calculated as follows: divFactor = Vin / V10k
 //Vin is the input voltage
 //V10k id the voltage on 10k resistor
-float divisionFactor = 5.746;
-//float Aref = 1.41;   //1.2 or 1.315 1.415
-unsigned long total = 0;
+float divisionFactor = 16.379;
+float Aref = 1.41;   //1.2 or 1.315 1.415
+int total = 0;
 int sample = 0;
 unsigned char sample_count = 0;
 float voltage = 0;
@@ -98,8 +103,7 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
-unsigned long startTimeVA;
-long int interval, intervalVA;
+long int interval;
 
 //definition of variables for DHT22
 DHT dhtOut(52, DHT22);
@@ -130,10 +134,55 @@ char binHumidityIn[9] = {0};
 char binPercentage[9] = {0}; 
 char binWeight[9] = {0};
 
+/***************************************************
+ *  Name:        ISR(WDT_vect)
+ *
+ *  Returns:     Nothing.
+ *
+ *  Parameters:  None.
+ *
+ *  Description: Watchdog Interrupt Service. This
+ *               is executed when watchdog timed out.
+ *
+ ***************************************************/
+ISR(WDT_vect)
+{
+
+}
+
+
+/***************************************************
+ *  Name:        enterSleep
+ *
+ *  Returns:     Nothing.
+ *
+ *  Parameters:  None.
+ *
+ *  Description: Enters the arduino into sleep mode.
+ *
+ ***************************************************/
+void enterSleep(void)
+{
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);   /* EDIT: could also use SLEEP_MODE_PWR_DOWN for lowest power consumption. SLEEP_MODE_PWR_SAVE*/
+  sleep_enable();
+  
+  /* Now enter sleep mode. */
+  sleep_mode();
+  
+  /* The program will continue from here after the WDT timeout*/
+  sleep_disable(); /* First thing to do is disable sleep. */
+  
+  /* Re-enable the peripherals. */
+  power_all_enable();
+}
+
+
+
+
+
 void setup() {
 
-  interval = 600000; //normal = 600000 = 10 min
-  intervalVA = 30000;
+  interval = 60000; //normal = 600000 = 10 min
   
   // use the internal ~1.1volt reference
   //analogReference(INTERNAL1V1);
@@ -215,7 +264,6 @@ void setup() {
   //starting software serial link 
   Sigfox.begin(9600);
   Serial3.begin(9600);
-  delay(1000);
 
   //initialize digital pin LED_ON, LED_CL, LED_SD as an output
   pinMode(LED_ON, OUTPUT); 
@@ -225,6 +273,30 @@ void setup() {
   //init of battery charger pin as an output
   pinMode(CHARGER_CONTROL, OUTPUT);
   digitalWrite(CHARGER_CONTROL, LOW);
+
+   /*** Setup the WDT ***/
+  
+  Serial.println();
+  Serial.println(F("Initializing Battery sleep settings"));
+  
+  /* Clear the reset flag. */
+  MCUSR &= ~(1<<WDRF);
+  
+  /* In order to change WDE or the prescaler, we need to
+   * set WDCE (This will allow updates for 4 clock cycles).
+   */
+  WDTCSR |= (1<<WDCE) | (1<<WDE);
+
+  /* set new watchdog timeout prescaler value */
+  WDTCSR = 1<<WDP0 | 1<<WDP3; /* 8.0 seconds // NOTE from JP: this is not exactly 8.0 !, also seems to pauze system clock during sleep
+  
+  /* Enable the WD interrupt (note no reset). */
+  WDTCSR |= _BV(WDIE);
+  
+  Serial.println();
+  Serial.println(F("End Battery sleep"));
+  
+  
 }
 
 void loop() {
@@ -299,6 +371,8 @@ void loop() {
     
   //wait for MPU interrupt
   while (!mpuInterrupt && fifoCount < packetSize) {
+    //Serial.println("----------------------MPU INTERRUPT---------------------");
+    
     if (Serial3.available()) {
       message = Serial3.readString();
     }    
@@ -309,7 +383,6 @@ void loop() {
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
       Serial.println(message);
       Serial.println("----------------------SIGFOX-MESSAGE---------------------");
-
       message = "";
       digitalWrite(LED_ON, HIGH);
     }
@@ -333,85 +406,10 @@ void loop() {
 
     //measuring actual time
     currentTime = millis();
-
-    if((currentTime - startTimeVA) >= (intervalVA + 500)){
-      Serial.println("Measuring voltage on battery and charging current");
-      
-      //reading value from analog input to clear old input
-      analogRead(A1);
-  
-      //measuring input voltage
-      total = 0;
-      sample_count = 0;
-      while(sample_count < NUM_SAMPLES){
-        sample = analogRead(A1);
-        //Serial.println(sample);
-        total += sample;
-        sample_count++;
-        delay(2);
-      }
-
-      //converting input voltage to voltage and calculating percentage
-      voltage = (float)total / (float)NUM_SAMPLES;
-      voltage *= Vcc;
-      voltage /= 1023.0;
-      Serial.print("Voltage on 10k resistor: ");
-      Serial.print(voltage);
-      Serial.println(" V");
-      voltage *= divisionFactor;
-      voltage += DIODE_DROP;
-      Serial.print("Voltage on battery: ");
-      Serial.print(voltage);
-      Serial.println(" V");
-
-      //100% / difference between actual voltage and 0% voltage gives volts per %
-      percentage = (voltage - 11) * (100 / (highVoltage - 11)); 
-      if(percentage < 0){
-        percentage = 0;
-      }
-      Serial.print("Percentage: ");
-      Serial.print(percentage);
-      Serial.println(" %");
-
-      if (voltage < lowVoltage){
-        Serial.println("Battery is charging...");
-        digitalWrite(CHARGER_CONTROL, HIGH);
-      }
-      else if(voltage >= highVoltage){
-        Serial.println("Battery is fully charged");
-        digitalWrite(CHARGER_CONTROL, LOW);
-      }
-
-      //measuring current flowing from solar panel to battery
-      analogRead(A2);
-      total = 0;
-      sample_count = 0;
-      while(sample_count < NUM_SAMPLES){
-        sample = analogRead(A2);
-        //Serial.println(sample);
-        total += sample;
-        sample_count++;
-        delay(2);
-      }
-      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1023.0) - 2.5) * 10);
-      Serial.print("Current flowing to battery: ");
-      Serial.print(current);
-      Serial.println(" A");
-
-      if (current >= highCurrent){
-        Serial.println("Charging current is too high, disconnecting charger");
-        digitalWrite(CHARGER_CONTROL, LOW);
-      }
-      else{
-        digitalWrite(CHARGER_CONTROL, HIGH);
-      }
-      
-      startTimeVA = millis();
-    }
-    
+    //Serial.print(currentTime); /////////////////////////////////////////////////////////
     //repeated every 10min
-    if((currentTime - startTime) >=  (interval + 500) || calibrationState == 1){
-
+    //if((currentTime - startTime) >=  (interval + 500) || calibrationState == 1){  // now use sleep as timer
+    if (1 == 1){
       digitalWrite(LED_ON, LOW);
       calibrationState = 2;
       
@@ -448,16 +446,14 @@ void loop() {
       sample_count = 0;
       while(sample_count < NUM_SAMPLES){
         sample = analogRead(A1);
-        //Serial.println(sample);
+        Serial.println(sample);
         total += sample;
         sample_count++;
-        delay(2);
+        delay(10);
       }
 
       //converting input voltage to voltage and calculating percentage
-      voltage = (float)total / (float)NUM_SAMPLES;
-      voltage *= Vcc;
-      voltage /= 1023.0;
+      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1024.0;
       Serial.print("Voltage on 10k resistor: ");
       Serial.print(voltage);
       Serial.println(" V");
@@ -469,11 +465,9 @@ void loop() {
 
       if (voltage < lowVoltage){
         digitalWrite(CHARGER_CONTROL, HIGH);
-        Serial.println("Battery is charging...");
       }
       else if(voltage >= highVoltage){
         digitalWrite(CHARGER_CONTROL, LOW);
-        Serial.println("Battery is fully charged");
       }
 
       //100% / difference between actual voltage and 0% voltage gives volts per %
@@ -485,12 +479,12 @@ void loop() {
       sample_count = 0;
       while(sample_count < NUM_SAMPLES){
         sample = analogRead(A2);
-        //Serial.println(sample);
+        Serial.println(sample);
         total += sample;
         sample_count++;
-        delay(2);
+        delay(10);
       }
-      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1023.0) - 2.5) * 10);
+      current = ((((float)total / (float)NUM_SAMPLES * Vcc / 1024.0) - 2.5) * 10);
       Serial.print("Current flowing to battery: ");
       Serial.print(current);
       Serial.println(" A");
@@ -559,7 +553,28 @@ void loop() {
       //measuring actual time
       startTime = millis();
       digitalWrite(LED_ON, HIGH);
+
+      Serial.println("-------------------------Sleeping Start-------------------------");
+      
+        // Sleeping code
+         //Serial.println(currentTime); 
+       digitalWrite(LED_ON, HIGH);
+       int a;  // each sleep iteration is 8 sec // 70 = 9 and half min // 69 seems to be more accurate
+       for( a = 0; a < 69; a = a + 1 ){
+            //digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+            //Serial.println("Loop f_wdt == 1");
+            Serial.println(a);
+            Serial.println("I will go sleep now");
+            delay(100); //Allow for serial print to complete.
+            digitalWrite(LED_ON, !digitalRead(LED_ON));
+            enterSleep();
+            Serial.println("Good morning, good morning :-) ");
+       }
+      //Serial.println("Loop before mpu");
+      digitalWrite(LED_ON, HIGH);
+      Serial.println("-------------------------Sleeping End-------------------------");
     }
+     
   }
 
   //reset interrupt flag and get INT_STATUS byte
@@ -629,6 +644,7 @@ void loop() {
         }
     #endif
   }
+
 }
 
 void messageConvert() {
@@ -790,10 +806,9 @@ void messageConvert() {
    {  
       digitalWrite(LED_SD, HIGH);
       Serial.println(finalMessage);
-      Sigfox.print("AT$SF=");
-      Sigfox.println(finalMessage);
+      Serial3.print("AT$SF=");
+      Serial3.println(finalMessage);
       delay(200);
-      Serial.println("Message has been sent");
       digitalWrite(LED_SD, LOW);
    }
 }
