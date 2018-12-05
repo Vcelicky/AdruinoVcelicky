@@ -33,17 +33,17 @@ float zero_factor = 318940; //318940
 //definition of variables for battery status
 #define CHARGER_CONTROL 49
 #define NUM_SAMPLES 100
-#define DIODE_DROP 0.733
+#define DIODE_DROP 0.681
 float lowVoltage = 13.5;
 float highVoltage = 13.8;
 float highCurrent = 0.45;
-float Vcc = 5.1;
+float Vcc = 4.96;
 //Division factor is calculated as follows: divFactor = Vin / V10k
 //Vin is the input voltage
 //V10k id the voltage on 10k resistor
-float divisionFactor = 17;
-float Aref = 1.41;   //1.2 or 1.315 1.415
-int total = 0;
+float divisionFactor = 5.746;
+//float Aref = 1.41;   //1.2 or 1.315 1.415
+unsigned long total = 0;
 int sample = 0;
 unsigned char sample_count = 0;
 float voltage = 0;
@@ -352,7 +352,9 @@ void loop() {
       }
 
       //converting input voltage to voltage and calculating percentage
-      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1023.0;
+      voltage = (float)total / (float)NUM_SAMPLES;
+      voltage *= Vcc;
+      voltage /= 1023.0;
       Serial.print("Voltage on 10k resistor: ");
       Serial.print(voltage);
       Serial.println(" V");
@@ -364,6 +366,9 @@ void loop() {
 
       //100% / difference between actual voltage and 0% voltage gives volts per %
       percentage = (voltage - 11) * (100 / (highVoltage - 11)); 
+      if(percentage < 0){
+        percentage = 0;
+      }
       Serial.print("Percentage: ");
       Serial.print(percentage);
       Serial.println(" %");
@@ -450,7 +455,9 @@ void loop() {
       }
 
       //converting input voltage to voltage and calculating percentage
-      voltage = (float)total / (float)NUM_SAMPLES * Vcc / 1023.0;
+      voltage = (float)total / (float)NUM_SAMPLES;
+      voltage *= Vcc;
+      voltage /= 1023.0;
       Serial.print("Voltage on 10k resistor: ");
       Serial.print(voltage);
       Serial.println(" V");
