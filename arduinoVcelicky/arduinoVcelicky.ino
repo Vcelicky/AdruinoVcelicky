@@ -57,6 +57,7 @@ unsigned char sample_count = 0;
 float voltage = 0;
 float current = 0;
 int percentage;
+bool charging = false;
 
 //definition of variables for MPU6050
 MPU6050 mpu;
@@ -341,8 +342,8 @@ void messageConvert() {
    {  
       digitalWrite(LED_SD, HIGH);
       Serial.println(finalMessage);
-      Serial3.print("AT$SF=");
-      Serial3.println(finalMessage);
+      Sigfox.print("AT$SF=");
+      Sigfox.println(finalMessage);
       delay(200);
       digitalWrite(LED_SD, LOW);
    }
@@ -545,7 +546,7 @@ void setup() {
 
   //init of battery charger pin as an output
   pinMode(CHARGER_CONTROL, OUTPUT);
-  digitalWrite(CHARGER_CONTROL, LOW);
+  digitalWrite(CHARGER_CONTROL, charging);
 
    /*** Setup the WDT ***/
   
@@ -712,13 +713,14 @@ void loop() {
 
 		//Determine whether the battery needs to be charged
 		if (voltage < lowVoltage){
-			Serial.println("Battery is charging...");
-			digitalWrite(CHARGER_CONTROL, HIGH);
+		  Serial.println("Battery is charging...");
+      charging = true;
 		}
 		else if(voltage >= highVoltage){
 			Serial.println("Battery is fully charged");
-			digitalWrite(CHARGER_CONTROL, LOW);
+			charging = false;
 		}
+    digitalWrite(CHARGER_CONTROL, charging);
 		
 		//Measuring charging current flowing from solar panel to battery
 		getAnalogSample(ANALOG_IN_CURRENT);
@@ -731,11 +733,12 @@ void loop() {
 
 		if (current >= highCurrent){
 			Serial.println("Charging current is too high, disconnecting charger");
-			digitalWrite(CHARGER_CONTROL, LOW);
+			charging = false;
 		}
 		else{
-			digitalWrite(CHARGER_CONTROL, HIGH);
+			charging = true;
 		}
+    digitalWrite(CHARGER_CONTROL, charging);
 
 		startTimeVA = millis();
 	}
@@ -799,14 +802,15 @@ void loop() {
 		}
 
 		//Determine whether the battery needs to be charged
-		if (voltage < lowVoltage){
-			Serial.println("Battery is charging...");
-			digitalWrite(CHARGER_CONTROL, HIGH);
-		}
-		else if(voltage >= highVoltage){
-			Serial.println("Battery is fully charged");
-			digitalWrite(CHARGER_CONTROL, LOW);
-		}
+    if (voltage < lowVoltage){
+      Serial.println("Battery is charging...");
+      charging = true;
+    }
+    else if(voltage >= highVoltage){
+      Serial.println("Battery is fully charged");
+      charging = false;
+    }
+    digitalWrite(CHARGER_CONTROL, charging);
 		
 		//Measuring charging current flowing from solar panel to battery
 		getAnalogSample(ANALOG_IN_CURRENT);
@@ -818,12 +822,13 @@ void loop() {
 		Serial.println(" A");
 
 		if (current >= highCurrent){
-			Serial.println("Charging current is too high, disconnecting charger");
-			digitalWrite(CHARGER_CONTROL, LOW);
-		}
-		else{
-			digitalWrite(CHARGER_CONTROL, HIGH);
-		}
+      Serial.println("Charging current is too high, disconnecting charger");
+      charging = false;
+    }
+    else{
+      charging = true;
+    }
+    digitalWrite(CHARGER_CONTROL, charging);
 
 		//measure weight
 		weight = scale.get_units();
