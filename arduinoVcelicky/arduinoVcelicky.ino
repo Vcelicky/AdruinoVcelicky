@@ -39,6 +39,7 @@ float zero_factor = 318940; //318940
 #define CHARGER_CONTROL 49
 #define ANALOG_IN_VOLTAGE 1
 #define ANALOG_IN_CURRENT 2
+#define ANALOG_IN_SOLAR 3
 #define NUM_SAMPLES 100
 #define DIODE_DROP 0.681
 float lowVoltage = 13.5;
@@ -55,6 +56,7 @@ unsigned long total = 0;
 float sample = 0;
 unsigned char sample_count = 0;
 float voltage = 0;
+float voltageSolar = 0;
 float current = 0;
 int percentage;
 bool charging = false;
@@ -107,8 +109,7 @@ unsigned long startTimeAkc;
 unsigned long currentTime;
 unsigned long startTime;
 unsigned long startTimeWaitAkc;
-unsigned long startTimeVA;
-long int interval, intervalVA;
+long int interval;
 
 //definition of variables for DHT22
 DHT dhtOut(52, DHT22);
@@ -311,6 +312,12 @@ void messageConvert() {
     }
     else finalBinMessage[3] = '0';
 
+    //adding to message charging state
+    if(charging){
+      finalBinMessage[2] = '1';
+    }
+    finalBinMessage[2] = '0';
+    
     //final message
     Serial.println("Final message:");
     Serial.print(finalBinMessage);
@@ -454,7 +461,6 @@ void getAnalogSample(int analogIn){
 void setup() {
 
   interval = 600000; //normal = 600000 = 10 min
-  intervalVA = 30000;
   
   // use the internal ~1.1volt reference
   //analogReference(INTERNAL1V1);
@@ -682,66 +688,6 @@ void loop() {
 
     //measuring actual time
     currentTime = millis();
-	
-	//TODO this function to different place !!!
-	if((currentTime - startTimeVA) >= (intervalVA + 500)){
-		Serial.println("Measuring voltage on battery and charging current");
-		
-		//Measuring voltage on battery
-		getAnalogSample(ANALOG_IN_VOLTAGE);
-		
-		//Converting analog sample to voltage and calculating percentage
-		voltage = sample;
-		Serial.print("Voltage on 10k resistor: ");
-		Serial.print(voltage);
-		Serial.println(" V");
-		voltage *= divisionFactor;
-		voltage += DIODE_DROP;
-		Serial.print("Voltage on battery: ");
-		Serial.print(voltage);
-		Serial.println(" V");
-		
-		//100% / difference between actual voltage and 0% voltage gives volts per %
-		percentage = (voltage - zeroVoltage) * (100 / (highVoltage - zeroVoltage)); 
-		
-		if(percentage < 0){
-			percentage = 0;
-		}
-		Serial.print("Percentage: ");
-		Serial.print(percentage);
-		Serial.println(" %");
-
-		//Determine whether the battery needs to be charged
-		if (voltage < lowVoltage){
-		  Serial.println("Battery is charging...");
-      charging = true;
-		}
-		else if(voltage >= highVoltage){
-			Serial.println("Battery is fully charged");
-			charging = false;
-		}
-    digitalWrite(CHARGER_CONTROL, charging);
-		
-		//Measuring charging current flowing from solar panel to battery
-		getAnalogSample(ANALOG_IN_CURRENT);
-		
-		current = sample - 2.5;
-		current *= 10;
-		Serial.print("Current flowing to battery: ");
-		Serial.print(current);
-		Serial.println(" A");
-
-		if (current >= highCurrent){
-			Serial.println("Charging current is too high, disconnecting charger");
-			charging = false;
-		}
-		else{
-			charging = true;
-		}
-    digitalWrite(CHARGER_CONTROL, charging);
-
-		startTimeVA = millis();
-	}
 
     //Serial.print(currentTime); /////////////////////////////////////////////////////////
     //repeated every 10min
@@ -760,21 +706,36 @@ void loop() {
 
 		//checking measuremts from DHT22s
 		if((humidityOut < 0) || (humidityOut > 100)){
-		humidityOut = 127;
+			humidityOut = 127;
 		}
 
 		if((temperatureOut < -50) || (temperatureOut > 80)){
-		temperatureOut = 127;
+			temperatureOut = 127;
 		}
 
 		if((humidityIn < 0) || (humidityIn > 100)){
-		humidityIn = 127; 
+			humidityIn = 127; 
 		}
 
 		if((temperatureIn < -50) || (temperatureIn > 80)){
-		temperatureIn = 127;
+			temperatureIn = 127;
 		}
-       
+
+		//Measuring voltage on solar panel
+		getAnalogSample(ANALOG_IN_SOLAR);
+		
+		//Converting analog sample to voltage and calculating percentage
+		voltageSolar = sample;
+		Serial.print("Voltage on 10k resistor: ");
+		Serial.print(voltageSolar);
+		Serial.println(" V");
+		
+		voltageSolar *= divisionFactor;
+		
+		Serial.print("Voltage on solar panel: ");
+		Serial.print(voltageSolar);
+		Serial.println(" V");
+		
 		//Measuring voltage on battery
 		getAnalogSample(ANALOG_IN_VOLTAGE);
 
@@ -802,16 +763,20 @@ void loop() {
 		}
 
 		//Determine whether the battery needs to be charged
-    if (voltage < lowVoltage){
-      Serial.println("Battery is charging...");
-      charging = true;
-    }
-    else if(voltage >= highVoltage){
-      Serial.println("Battery is fully charged");
+		if (voltageSolar > voltage && voltage < lowVoltage){
+		  Serial.println("Battery is charging...");
+		  charging = true;
+		}
+		else if(voltage >= highVoltage){
+		  Serial.println("Battery is fully charged");
+		  charging = false;
+		}
+    else if(voltageSolar <= voltage){
+      Serial.println("Battery is not charging because of low sunlight");
       charging = false;
     }
-    digitalWrite(CHARGER_CONTROL, charging);
-		
+		digitalWrite(CHARGER_CONTROL, charging);
+			
 		//Measuring charging current flowing from solar panel to battery
 		getAnalogSample(ANALOG_IN_CURRENT);
 		
@@ -822,13 +787,13 @@ void loop() {
 		Serial.println(" A");
 
 		if (current >= highCurrent){
-      Serial.println("Charging current is too high, disconnecting charger");
-      charging = false;
-    }
-    else{
-      charging = true;
-    }
-    digitalWrite(CHARGER_CONTROL, charging);
+			Serial.println("Charging current is too high, disconnecting charger");
+			charging = false;
+		}
+		else{
+		  charging = true;
+		}
+		digitalWrite(CHARGER_CONTROL, charging);
 
 		//measure weight
 		weight = scale.get_units();
